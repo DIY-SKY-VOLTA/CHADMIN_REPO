@@ -1,0 +1,139 @@
+/* Container */
+.command-list {
+  background-color: #ffffff;
+  border: 1px solid #eeeeee;
+  border-radius: 0.75rem; /* rounded-xl */
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+  overflow: hidden;
+  width: 720px; /* Matching editor width */
+  max-width: 90vw;
+  padding: 0.25rem; /* Reduced padding */
+  /* Entrance animation handled by GSAP */
+}
+
+.dark .command-list {
+  background-color: #18181b; /* zinc-900 */
+  border-color: #27272a; /* zinc-800 */
+}
+
+/* Header */
+.command-list-header {
+  padding: 0.3rem 0.5rem; /* Reduced padding */
+  font-size: 8px; /* Slightly smaller */
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: #999999;
+  border-bottom: 1px solid #f5f5f5;
+  margin-bottom: 0.25rem;
+}
+
+.dark .command-list-header {
+  border-bottom-color: #27272a;
+}
+
+/* Grid/Flex Container */
+.command-items-grid {
+  display: flex;
+  flex-direction: row;
+  gap: 0.25rem;
+  overflow-x: auto;
+  padding-bottom: 0.125rem;
+  scrollbar-width: none; /* Hide scrollbar for minimal height */
+}
+
+.command-items-grid::-webkit-scrollbar {
+  display: none; /* Hide scrollbar for minimal height */
+}
+
+/* Item Button */
+.command-item {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: row; /* Horizontal layout within item */
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.6rem; /* Tighter padding */
+  border-radius: 0.5rem;
+  transition: all 0.2s ease;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: #1a1a1a;
+}
+
+.dark .command-item {
+  color: #ffffff;
+}
+
+/* Hover State (Unselected) */
+.command-item:hover:not(.selected) {
+  background-color: #f5f5f5;
+}
+
+.dark .command-item:hover:not(.selected) {
+  background-color: #27272a;
+}
+
+/* Selected State */
+.command-item.selected {
+  background-color: #1a1a1a;
+  color: #ffffff;
+}
+
+.dark .command-item.selected {
+  background-color: #ffffff;
+  color: #000000;
+}
+
+/* Icon Wrap */
+.command-icon-wrap {
+  width: 1.75rem; /* Much smaller */
+  height: 1.75rem;
+  border-radius: 0.375rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.875rem;
+  background-color: #f0f0f0;
+  transition: transform 0.2s ease;
+}
+
+.command-item.selected .command-icon-wrap {
+  transform: scale(1.05);
+}
+
+.dark .command-icon-wrap:not(.selected) {
+  background-color: #27272a;
+}
+
+.command-item.selected .command-icon-wrap {
+  background-color: rgba(255, 255, 255, 0.15);
+}
+
+.dark .command-item.selected .command-icon-wrap {
+  background-color: rgba(0, 0, 0, 0.1);
+}
+
+/* Text Containers */
+.command-text-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start; /* Left align */
+  text-align: left;
+}
+
+.command-title {
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.command-desc {
+  display: none; 
+}
+
+.tippy-box{
+  max-width: 100% !important;
+  width: auto;
+}
