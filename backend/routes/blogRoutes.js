@@ -23,3 +23,6 @@ router.post('/submissions/:id/reject', blogController.rejectBlog);
 router.get('/writer/:userId/tier', blogController.getWriterTier);
 
 module.exports = router;
+
+// All submissions with filtering and pagination
+router.get('/all', blogController.getAllSubmissions);

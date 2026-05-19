@@ -7,7 +7,8 @@ import {
   User, 
   Sun, 
   Moon, 
-  X 
+  X,
+  List
 } from 'lucide-react';
 import logoMini from '../../assets/logo-mini.webp';
 
@@ -17,6 +18,7 @@ const Sidebar = ({ isDarkMode, onToggleTheme, onClose }) => {
   const menuItems = [
     { icon: LayoutDashboard, label: 'Overview', path: '/dashboard' },
     { icon: FileText, label: 'Editorial', path: '/editorial' },
+    { icon: List, label: 'All Posts', path: '/posts' },
   ];
 
   const handleLogout = () => {

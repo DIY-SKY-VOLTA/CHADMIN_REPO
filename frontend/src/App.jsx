@@ -5,6 +5,7 @@ import AdminLayout from './components/Layout/AdminLayout';
 import Dashboard from './pages/Dashboard';
 import EditorialList from './pages/Editorial/EditorialList';
 import EditorialDetail from './pages/Editorial/EditorialDetail';
+import AllPosts from './pages/AllPosts';
 
 // Protected Route Component
 const ProtectedRoute = ({ children }) => {
@@ -36,6 +37,10 @@ function App() {
         <Route 
           path="/editorial/:id" 
           element={<ProtectedRoute><EditorialDetail /></ProtectedRoute>} 
+        />
+        <Route 
+          path="/posts" 
+          element={<ProtectedRoute><AllPosts /></ProtectedRoute>} 
         />
 
         {/* Redirects */}
