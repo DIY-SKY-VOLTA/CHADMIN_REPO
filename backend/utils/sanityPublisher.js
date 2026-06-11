@@ -365,9 +365,35 @@ function autoGenerateExcerpt(content, maxLength = 200) {
   return text.substring(0, maxLength).trim() + '...';
 }
 
+/**
+ * Fetch all posts directly from Sanity API
+ */
+async function getAllSanityPosts() {
+  if (!SANITY_TOKEN) return [];
+  try {
+    const posts = await sanityClient.fetch(`*[_type == "post"] | order(_createdAt desc) {
+      _id,
+      title,
+      "slug": slug.current,
+      excerpt,
+      publishedAt,
+      "_createdAt": _createdAt,
+      "_updatedAt": _updatedAt,
+      "coverImage": mainImage.asset->url,
+      "tags": tags,
+      readTime
+    }`);
+    return posts;
+  } catch (err) {
+    console.error('Failed to fetch from Sanity:', err.message);
+    return [];
+  }
+}
+
 module.exports = {
   publishToSanity,
   updateSanityPost,
   deleteSanityPost,
   htmlToPortableText,
+  getAllSanityPosts,
 };

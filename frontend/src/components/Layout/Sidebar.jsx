@@ -1,25 +1,75 @@
+import { useState, useEffect } from 'react';
 import { NavLink } from 'react-router-dom';
 import { 
   LayoutDashboard, 
   FileText, 
   LogOut, 
-  ChevronRight, 
-  User, 
   Sun, 
   Moon, 
   X,
-  List
+  List,
+  Image as ImageIcon,
+  Users,
+  MessageSquare,
+  Tag,
+  Globe,
+  BarChart3,
+  Activity,
+  Settings,
+  ChevronsUpDown,
 } from 'lucide-react';
-import logoMini from '../../assets/logo-mini.webp';
+import { motion, AnimatePresence } from 'framer-motion';
+
+const sections = [
+  {
+    label: 'Overview',
+    items: [
+      { icon: LayoutDashboard, label: 'Dashboard', path: '/dashboard' },
+      { icon: BarChart3, label: 'Analytics', path: '/analytics' },
+      { icon: Activity, label: 'Activity Log', path: '/activity' },
+    ],
+  },
+  {
+    label: 'Publishing',
+    items: [
+      { icon: FileText, label: 'Editorial Queue', path: '/editorial', badgeKey: 'pending' },
+      { icon: List, label: 'Submissions', path: '/posts' },
+      { icon: Globe, label: 'Live Posts', path: '/published' },
+    ],
+  },
+  {
+    label: 'Management',
+    items: [
+      { icon: Tag, label: 'Categories', path: '/categories' },
+      { icon: ImageIcon, label: 'Media Library', path: '/images' },
+      { icon: MessageSquare, label: 'Comments', path: '/comments' },
+      { icon: Users, label: 'Writers', path: '/users' },
+    ],
+  },
+];
 
 const Sidebar = ({ isDarkMode, onToggleTheme, onClose }) => {
   const adminUser = JSON.parse(localStorage.getItem('admin_user') || '{}');
+  const [pendingCount, setPendingCount] = useState(null);
+  const [isWorkspaceMenuOpen, setIsWorkspaceMenuOpen] = useState(false);
 
-  const menuItems = [
-    { icon: LayoutDashboard, label: 'Overview', path: '/dashboard' },
-    { icon: FileText, label: 'Editorial', path: '/editorial' },
-    { icon: List, label: 'All Posts', path: '/posts' },
-  ];
+  useEffect(() => {
+    const token = localStorage.getItem('admin_token');
+    if (!token) return;
+
+    const fetchPending = async () => {
+      try {
+        const { default: adminAPI } = await import('@/api/adminAPI');
+        const res = await adminAPI.get('/blogs/dashboard/stats');
+        if (res.success && res.stats) {
+          setPendingCount(res.stats.pending);
+        }
+      } catch {}
+    };
+    fetchPending();
+    const interval = setInterval(fetchPending, 30000);
+    return () => clearInterval(interval);
+  }, []);
 
   const handleLogout = () => {
     localStorage.removeItem('admin_token');
@@ -28,82 +78,143 @@ const Sidebar = ({ isDarkMode, onToggleTheme, onClose }) => {
   };
 
   return (
-    <aside className="w-56 h-full border-r border-gray-200 dark:border-white/10 bg-gray-50 dark:bg-[#18181a] flex flex-col transition-colors duration-300">
-      {/* Brand */}
-      <div className="h-12 flex items-center justify-between px-4 border-b border-gray-200 dark:border-white/5">
-        <div className="flex items-center gap-2">
-          <div className="w-6 h-6 rounded-[6px] flex items-center justify-center overflow-hidden">
-            <img src={logoMini} alt="Contest Hopper Logo" className="w-full h-full object-cover" />
+    <aside className="w-[220px] h-full flex flex-col bg-[#f9f9fb] dark:bg-[#111112] border-r border-neutral-200/60 dark:border-white/[0.04] text-neutral-800 dark:text-neutral-300 transition-colors duration-300 selection:bg-neutral-200 dark:selection:bg-neutral-800">
+      
+      {/* Workspace Switcher Header */}
+      <div className="shrink-0 p-3 flex items-center justify-between">
+        <div 
+          onClick={() => setIsWorkspaceMenuOpen(!isWorkspaceMenuOpen)}
+          className="flex-1 flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-neutral-200/50 dark:hover:bg-white/5 cursor-pointer transition-colors group"
+        >
+          <div className="w-5 h-5 rounded overflow-hidden shrink-0 border border-neutral-200/80 dark:border-white/10">
+            <img 
+              src={adminUser.avatar || 'https://api.dicebear.com/7.x/avataaars/svg?seed=Admin'} 
+              alt="Avatar" 
+              className="w-full h-full object-cover" 
+            />
           </div>
-          <span className="font-bold text-sm text-gray-900 dark:text-white uppercase">Admin</span>
+          <div className="flex-1 min-w-0">
+            <h2 className="text-[13px] font-semibold text-neutral-850 dark:text-neutral-200 truncate leading-tight">
+              {adminUser.username || 'Admin Workspace'}
+            </h2>
+          </div>
+          <ChevronsUpDown size={14} className="text-neutral-400 group-hover:text-neutral-600 dark:group-hover:text-neutral-300 transition-colors shrink-0" />
         </div>
+        
+        {/* Mobile Close Button */}
         {onClose && (
           <button 
             onClick={onClose}
-            className="p-1 rounded-[6px] hover:bg-gray-200 dark:hover:bg-white/5 text-gray-500 dark:text-[#a8b3cf] hover:text-gray-900 dark:hover:text-white lg:hidden"
+            className="p-1.5 ml-1 rounded hover:bg-neutral-200/50 dark:hover:bg-white/5 text-neutral-500 hover:text-neutral-800 dark:hover:text-white transition-colors lg:hidden"
           >
-            <X size={16} />
+            <X size={16} strokeWidth={1.5} />
           </button>
         )}
       </div>
 
-      {/* Navigation */}
-      <nav className="flex-1 p-2 space-y-1 overflow-y-auto">
-        {menuItems.map((item) => (
+      {/* Navigation Groups */}
+      <div className="flex-1 overflow-y-auto custom-scrollbar px-3 py-2 space-y-5">
+        {sections.map((section) => (
+          <div key={section.label} className="flex flex-col gap-0.5">
+            <span className="px-2 py-1 text-[11px] font-semibold tracking-[0.02em] text-neutral-500 dark:text-neutral-400 uppercase">
+              {section.label}
+            </span>
+            
+            <div className="flex flex-col gap-[1px]">
+              {section.items.map((item) => (
+                <NavLink
+                  key={item.path}
+                  to={item.path}
+                  onClick={onClose}
+                  className={({ isActive }) => `
+                    flex items-center gap-2.5 px-2 py-[5px] rounded-[5px] text-[13px] transition-colors group outline-none
+                    ${isActive 
+                      ? 'bg-neutral-200/70 dark:bg-white/[0.06] font-medium text-neutral-900 dark:text-neutral-100' 
+                      : 'text-neutral-600 dark:text-neutral-400 hover:bg-neutral-200/40 dark:hover:bg-white/[0.03] hover:text-neutral-900 dark:hover:text-neutral-200'
+                    }
+                  `}
+                >
+                  {({ isActive }) => (
+                    <>
+                      <item.icon 
+                        size={16} 
+                        strokeWidth={1.5} 
+                        className={`shrink-0 transition-colors ${
+                          isActive 
+                            ? 'text-neutral-900 dark:text-neutral-200' 
+                            : 'text-neutral-500 dark:text-neutral-400 group-hover:text-neutral-700 dark:group-hover:text-neutral-300'
+                        }`} 
+                      />
+                      <span className="truncate">{item.label}</span>
+                      
+                      {/* Notifications Badge */}
+                      {item.badgeKey && pendingCount > 0 && (
+                        <span className="ml-auto px-[5px] py-[1.5px] rounded bg-neutral-200 dark:bg-white/10 text-[10px] font-semibold text-neutral-650 dark:text-neutral-400 leading-none">
+                          {pendingCount > 99 ? '99+' : pendingCount}
+                        </span>
+                      )}
+                    </>
+                  )}
+                </NavLink>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Minimal Footer */}
+      <div className="shrink-0 p-3 pt-2">
+        <div className="flex flex-col gap-[1px]">
+          {/* Settings */}
           <NavLink
-            key={item.path}
-            to={item.path}
+            to="/settings"
+            onClick={onClose}
             className={({ isActive }) => `
-              flex items-center justify-between px-3 py-2.5 rounded-[8px] transition-all
+              flex items-center gap-2.5 px-2 py-[5px] rounded-[5px] text-[13px] transition-colors group outline-none
               ${isActive 
-                ? 'bg-[#00f0ff]/10 text-[#00f0ff]' 
-                : 'text-gray-600 dark:text-[#a8b3cf] hover:text-gray-900 dark:hover:text-white hover:bg-gray-200 dark:hover:bg-white/5'
+                ? 'bg-neutral-200/70 dark:bg-white/[0.06] font-medium text-neutral-900 dark:text-neutral-100' 
+                : 'text-neutral-600 dark:text-neutral-400 hover:bg-neutral-200/40 dark:hover:bg-white/[0.03] hover:text-neutral-900 dark:hover:text-neutral-200'
               }
             `}
           >
             {({ isActive }) => (
               <>
-                <div className="flex items-center gap-2.5">
-                  <item.icon size={16} />
-                  <span className="text-xs font-medium uppercase">{item.label}</span>
-                </div>
-                {isActive && <ChevronRight size={12} className="opacity-50" />}
+                <Settings 
+                  size={16} 
+                  strokeWidth={1.5} 
+                  className={`shrink-0 transition-colors ${
+                    isActive 
+                      ? 'text-neutral-900 dark:text-neutral-200' 
+                      : 'text-neutral-500 dark:text-neutral-400 group-hover:text-neutral-700 dark:group-hover:text-neutral-300'
+                  }`} 
+                />
+                <span className="truncate">Settings</span>
               </>
             )}
           </NavLink>
-        ))}
-      </nav>
 
-      {/* Theme Toggle */}
-      <div className="p-2 border-t border-gray-200 dark:border-white/5">
-        <button 
-          type="button"
-          onClick={() => onToggleTheme && onToggleTheme()}
-          className="w-full flex items-center gap-2.5 px-3 py-2 rounded-[8px] text-gray-600 dark:text-[#a8b3cf] hover:text-gray-900 dark:hover:text-white hover:bg-gray-200 dark:hover:bg-white/5 transition-all"
-        >
-          {isDarkMode ? <Sun size={16} className="text-amber-400" /> : <Moon size={16} className="text-blue-400" />}
-          <span className="text-xs font-medium">{isDarkMode ? 'Light Mode' : 'Dark Mode'}</span>
-        </button>
-      </div>
-
-      {/* Admin Profile */}
-      <div className="p-2 border-t border-gray-200 dark:border-white/5">
-        <div className="flex items-center gap-2 p-2 rounded-[8px] bg-gray-100 dark:bg-[#0d0d0f] border border-gray-200 dark:border-white/5">
-          <img 
-            src={adminUser.avatar || 'https://api.dicebear.com/7.x/avataaars/svg?seed=Admin'} 
-            alt="" 
-            className="w-8 h-8 rounded-[6px] border border-gray-200 dark:border-white/10" 
-          />
-          <div className="flex-1 min-w-0">
-            <p className="text-xs font-semibold text-gray-900 dark:text-white truncate">{adminUser.username || 'Admin'}</p>
-            <p className="text-[8px] text-gray-500 dark:text-[#a8b3cf]">Superuser</p>
-          </div>
+          {/* Theme Toggle */}
           <button 
-            onClick={handleLogout}
-            className="p-1.5 rounded-[6px] text-gray-500 dark:text-[#a8b3cf] hover:text-[#ff4757] hover:bg-[#ff4757]/10 transition-all"
-            title="Sign out"
+            type="button"
+            onClick={() => onToggleTheme && onToggleTheme()}
+            className="flex w-full items-center gap-2.5 px-2 py-[5px] rounded-[5px] text-[13px] text-neutral-600 dark:text-neutral-400 hover:bg-neutral-200/40 dark:hover:bg-white/[0.03] hover:text-neutral-900 dark:hover:text-neutral-200 transition-colors group outline-none cursor-pointer"
           >
-            <LogOut size={14} />
+            {isDarkMode ? (
+              <Sun size={16} strokeWidth={1.5} className="shrink-0 text-neutral-500 dark:text-neutral-400 group-hover:text-neutral-700 dark:group-hover:text-neutral-300 transition-colors" />
+            ) : (
+              <Moon size={16} strokeWidth={1.5} className="shrink-0 text-neutral-500 dark:text-neutral-400 group-hover:text-neutral-700 dark:group-hover:text-neutral-300 transition-colors" />
+            )}
+            <span className="truncate">{isDarkMode ? 'Light Mode' : 'Dark Mode'}</span>
+          </button>
+
+          {/* Logout */}
+          <button 
+            type="button"
+            onClick={handleLogout}
+            className="flex w-full items-center gap-2.5 px-2 py-[5px] rounded-[5px] text-[13px] text-neutral-600 dark:text-neutral-400 hover:bg-red-50 dark:hover:bg-red-500/10 hover:text-red-600 dark:hover:text-red-400 transition-colors group outline-none cursor-pointer"
+          >
+            <LogOut size={16} strokeWidth={1.5} className="shrink-0 text-neutral-500 dark:text-neutral-400 group-hover:text-red-600 dark:group-hover:text-red-400 transition-colors" />
+            <span className="truncate">Log Out</span>
           </button>
         </div>
       </div>

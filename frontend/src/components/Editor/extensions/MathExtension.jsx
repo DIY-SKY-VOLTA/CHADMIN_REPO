@@ -22,7 +22,7 @@ const loadKatex = () => {
   });
 };
 
-const MathComponent = ({ node, updateAttributes }) => {
+const MathComponent = ({ node, updateAttributes, editor, selected }) => {
   const { latex } = node.attrs;
   const containerRef = React.useRef(null);
   const [isLoaded, setIsLoaded] = React.useState(!!window.katex);
@@ -36,11 +36,13 @@ const MathComponent = ({ node, updateAttributes }) => {
   React.useEffect(() => {
     if (containerRef.current && window.katex) {
       try {
+        // Use non-throwing render so KaTeX doesn't break the node view
         window.katex.render(latex || '\\text{Enter LaTeX}', containerRef.current, {
           throwOnError: false,
           displayMode: true,
         });
       } catch (e) {
+        // Fallback to plain text if something goes wrong
         containerRef.current.textContent = latex;
       }
     } else if (containerRef.current) {
@@ -48,16 +50,20 @@ const MathComponent = ({ node, updateAttributes }) => {
     }
   }, [latex, isLoaded]);
 
+  const showInput = editor?.isEditable && selected;
+
   return (
     <div className="math-node-view">
       <div ref={containerRef} className="math-render" />
-      <input
-        className="math-input"
-        value={latex}
-        onChange={(e) => updateAttributes({ latex: e.target.value })}
-        placeholder="Type LaTeX here..."
-        onClick={(e) => e.stopPropagation()}
-      />
+      {showInput && (
+        <input
+          className="math-input"
+          value={latex}
+          onChange={(e) => updateAttributes({ latex: e.target.value })}
+          placeholder="Type LaTeX here..."
+          onClick={(e) => e.stopPropagation()}
+        />
+      )}
     </div>
   );
 };

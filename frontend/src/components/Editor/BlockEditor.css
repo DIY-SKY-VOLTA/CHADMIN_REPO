@@ -20,7 +20,7 @@
   position: relative;
 }
 
-.cover-image-container {
+  .cover-image-container {
   position: relative;
   aspect-ratio: 21/9;
   width: 100%;
@@ -30,6 +30,7 @@
   border: 1px solid #eeeeee;
   transition: all 0.2s ease;
 }
+
 
 .dark .cover-image-container {
   border-color: #27272a;

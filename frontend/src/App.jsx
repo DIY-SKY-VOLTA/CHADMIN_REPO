@@ -6,6 +6,14 @@ import Dashboard from './pages/Dashboard';
 import EditorialList from './pages/Editorial/EditorialList';
 import EditorialDetail from './pages/Editorial/EditorialDetail';
 import AllPosts from './pages/AllPosts';
+import ImageManager from './pages/ImageManager/ImageManager';
+import UsersPage from './pages/Users/Users';
+import CommentsPage from './pages/Comments/Comments';
+import CategoriesPage from './pages/Categories/Categories';
+import PublishedPage from './pages/Published/Published';
+import AnalyticsPage from './pages/Analytics/Analytics';
+import ActivityLog from './pages/ActivityLog/ActivityLog';
+import SettingsPage from './pages/Settings/Settings';
 
 // Protected Route Component
 const ProtectedRoute = ({ children }) => {
@@ -41,6 +49,38 @@ function App() {
         <Route 
           path="/posts" 
           element={<ProtectedRoute><AllPosts /></ProtectedRoute>} 
+        />
+        <Route 
+          path="/images" 
+          element={<ProtectedRoute><ImageManager /></ProtectedRoute>} 
+        />
+        <Route 
+          path="/analytics" 
+          element={<ProtectedRoute><AnalyticsPage /></ProtectedRoute>} 
+        />
+        <Route 
+          path="/users" 
+          element={<ProtectedRoute><UsersPage /></ProtectedRoute>} 
+        />
+        <Route 
+          path="/comments" 
+          element={<ProtectedRoute><CommentsPage /></ProtectedRoute>} 
+        />
+        <Route 
+          path="/categories" 
+          element={<ProtectedRoute><CategoriesPage /></ProtectedRoute>} 
+        />
+        <Route 
+          path="/published" 
+          element={<ProtectedRoute><PublishedPage /></ProtectedRoute>} 
+        />
+        <Route 
+          path="/activity" 
+          element={<ProtectedRoute><ActivityLog /></ProtectedRoute>} 
+        />
+        <Route 
+          path="/settings" 
+          element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} 
         />
 
         {/* Redirects */}

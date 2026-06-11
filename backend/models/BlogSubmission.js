@@ -50,7 +50,7 @@ const blogSubmissionSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['pending', 'approved', 'rejected'],
+    enum: ['pending', 'approved', 'rejected', 'draft'],
     default: 'pending',
     index: true,
   },
@@ -112,5 +112,9 @@ const blogSubmissionSchema = new mongoose.Schema({
     default: Date.now,
   },
 }, { timestamps: true });
+
+// Indexes for admin dashboard queries
+blogSubmissionSchema.index({ status: 1, updatedAt: -1 });    // Published listing sorted by update date
+blogSubmissionSchema.index({ status: 1, createdAt: -1 });    // Analytics: counts by status + date range
 
 module.exports = mongoose.model("BlogSubmission", blogSubmissionSchema);

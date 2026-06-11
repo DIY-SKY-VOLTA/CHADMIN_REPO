@@ -1,11 +1,27 @@
 const BlogSubmission = require('../models/BlogSubmission');
 const { publishToSanity } = require('../utils/sanityPublisher');
+const { logAction } = require('./activityLogController');
 
 exports.getPendingSubmissions = async (req, res) => {
   try {
-    const submissions = await BlogSubmission.find({ status: { $in: ['pending', 'pending review'] } })
-      .sort({ createdAt: -1 });
-    res.json({ success: true, submissions });
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 50));
+    const skip = (page - 1) * limit;
+
+    const query = { status: { $in: ['pending', 'pending review'] } };
+    const [submissions, total] = await Promise.all([
+      BlogSubmission.find(query)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit),
+      BlogSubmission.countDocuments(query),
+    ]);
+
+    res.json({
+      success: true,
+      submissions,
+      pagination: { page, limit, total, pages: Math.ceil(total / limit) },
+    });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
@@ -13,9 +29,24 @@ exports.getPendingSubmissions = async (req, res) => {
 
 exports.getApprovedSubmissions = async (req, res) => {
   try {
-    const submissions = await BlogSubmission.find({ status: 'approved' })
-      .sort({ createdAt: -1 });
-    res.json({ success: true, submissions });
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 50));
+    const skip = (page - 1) * limit;
+
+    const query = { status: 'approved' };
+    const [submissions, total] = await Promise.all([
+      BlogSubmission.find(query)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit),
+      BlogSubmission.countDocuments(query),
+    ]);
+
+    res.json({
+      success: true,
+      submissions,
+      pagination: { page, limit, total, pages: Math.ceil(total / limit) },
+    });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
@@ -23,9 +54,24 @@ exports.getApprovedSubmissions = async (req, res) => {
 
 exports.getRejectedSubmissions = async (req, res) => {
   try {
-    const submissions = await BlogSubmission.find({ status: 'rejected' })
-      .sort({ createdAt: -1 });
-    res.json({ success: true, submissions });
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 50));
+    const skip = (page - 1) * limit;
+
+    const query = { status: 'rejected' };
+    const [submissions, total] = await Promise.all([
+      BlogSubmission.find(query)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit),
+      BlogSubmission.countDocuments(query),
+    ]);
+
+    res.json({
+      success: true,
+      submissions,
+      pagination: { page, limit, total, pages: Math.ceil(total / limit) },
+    });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
@@ -115,6 +161,17 @@ exports.approveBlog = async (req, res) => {
     }
 
     await blog.save();
+
+    // Log activity
+    logAction({
+      adminId: req.admin.id,
+      adminName: req.admin.username || req.admin.id,
+      action: 'approve_blog',
+      description: `Approved blog: "${blog.title}"`,
+      targetId: id,
+      targetType: 'blog',
+    });
+
     res.json({ success: true, message: 'Blog approved and published' });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -139,6 +196,18 @@ exports.rejectBlog = async (req, res) => {
     };
 
     await blog.save();
+
+    // Log activity
+    logAction({
+      adminId: req.admin.id,
+      adminName: req.admin.username || req.admin.id,
+      action: 'reject_blog',
+      description: `Rejected blog: "${blog.title}"`,
+      targetId: id,
+      targetType: 'blog',
+      metadata: { feedback },
+    });
+
     res.json({ success: true, message: 'Blog rejected with feedback' });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -171,6 +240,60 @@ exports.getWriterTier = async (req, res) => {
     const tier = approved >= 5 ? 'trusted' : approved >= 1 ? 'verified' : 'new';
     
     res.json({ success: true, tier, approved, rejected, pending });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// Batch approve or reject multiple submissions at once
+exports.batchAction = async (req, res) => {
+  try {
+    const { ids, action, feedback } = req.body;
+
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ success: false, message: 'ids array is required' });
+    }
+
+    if (!['approve', 'reject'].includes(action)) {
+      return res.status(400).json({ success: false, message: 'action must be "approve" or "reject"' });
+    }
+
+    if (action === 'reject' && !feedback) {
+      return res.status(400).json({ success: false, message: 'Feedback is required for rejection' });
+    }
+
+    const update = {
+      status: action === 'approve' ? 'approved' : 'rejected',
+      verificationNotes: {
+        adminId: req.admin.id,
+        feedback: feedback || (action === 'approve' ? 'Approved (batch)' : ''),
+        verifiedAt: new Date(),
+      },
+      lastEditedBy: req.admin.id,
+      lastEditedAt: new Date(),
+    };
+
+    const result = await BlogSubmission.updateMany(
+      { _id: { $in: ids }, status: { $in: ['pending', 'pending review'] } },
+      { $set: update }
+    );
+
+    // Log batch activity
+    if (result.modifiedCount > 0) {
+      logAction({
+        adminId: req.admin.id,
+        adminName: req.admin.username || req.admin.id,
+        action: action === 'approve' ? 'batch_approve' : 'batch_reject',
+        description: `Batch ${action}: ${result.modifiedCount} submissions ${action === 'approve' ? 'approved' : 'rejected'}`,
+        metadata: { count: result.modifiedCount, ids },
+      });
+    }
+
+    res.json({
+      success: true,
+      message: `Batch ${action} completed: ${result.modifiedCount} updated`,
+      modifiedCount: result.modifiedCount,
+    });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }

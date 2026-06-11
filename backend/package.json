@@ -12,6 +12,7 @@
   "type": "commonjs",
   "dependencies": {
     "@sanity/client": "^7.22.0",
+    "@supabase/supabase-js": "^2.108.0",
     "bcrypt": "^6.0.0",
     "cheerio": "^1.2.0",
     "cors": "^2.8.6",

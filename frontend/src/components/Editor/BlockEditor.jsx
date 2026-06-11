@@ -11,9 +11,10 @@ import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
 import { common, createLowlight } from 'lowlight';
 import {
   Bold, Italic, Link as LinkIcon, Heading1, Heading2, Heading3, Quote,
-  List, ListOrdered, Code, Image as ImageIcon,
+  List, ListOrdered, Code, Image as ImageIcon, Images,
   Trash2, CheckCircle2, Sigma, Bookmark, Undo, Redo, Send,
-  Calendar, Clock
+  Calendar, Clock, Strikethrough,
+  AlignLeft, AlignCenter, AlignRight
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -23,9 +24,11 @@ import gsap from 'gsap';
 
 import { SlashCommand } from './SlashCommand';
 import CommandList from './CommandList';
+import TextAlign from '@tiptap/extension-text-align';
 import { MathExtension } from './extensions/MathExtension';
 import { Citation } from './extensions/Citation';
 import { CustomImage } from './extensions/CustomImage';
+import { Gallery } from './extensions/Gallery';
 import './BlockEditor.css';
 
 const lowlight = createLowlight(common);
@@ -81,6 +84,16 @@ const CitationToast = ({ t, editor, range }) => {
   );
 };
 
+const getContentSignature = (value) => {
+  if (value == null) return '';
+  if (typeof value === 'string') return value;
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return '';
+  }
+};
+
 export default function BlockEditor({
   content,
   onChange,
@@ -91,17 +104,19 @@ export default function BlockEditor({
   title,
   coverImage,
   author,
-  hideHeader = false
+  hideHeader = false,
+  blogId = '',
+  onOpenLibrary
 }) {
-  const fileInputRef = useRef(null);
   const coverInputRef = useRef(null);
-  const [onImageSelected, setOnImageSelected] = useState(null);
 
+  const linkRangeRef = useRef(null);
   const [linkUrl, setLinkUrl] = useState('');
   const [showLinkInput, setShowLinkInput] = useState(false);
   const [showAltInput, setShowAltInput] = useState(false);
   const [altText, setAltText] = useState('');
   const [showHeadingLevels, setShowHeadingLevels] = useState(false);
+  const [showCommandList, setShowCommandList] = useState(false);
   const [showCoverInput, setShowCoverInput] = useState(false);
   const [coverUrl, setCoverUrl] = useState('');
 
@@ -123,24 +138,16 @@ export default function BlockEditor({
     }
   }, [showCoverInput]);
 
-  const handleFileSelect = (e) => {
-    const file = e.target.files?.[0];
-    if (file && onImageSelected) {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const src = event.target?.result;
-        onImageSelected(src);
-        setOnImageSelected(null);
-      };
-      reader.readAsDataURL(file);
-    }
-  };
+
 
   const editor = useEditor({
     extensions: [
       StarterKit.configure({
         codeBlock: false,
         heading: { levels: [1, 2, 3] },
+      }),
+      TextAlign.configure({
+        types: ['heading', 'paragraph'],
       }),
       Placeholder.configure({
         placeholder: ({ node, editor }) => {
@@ -152,6 +159,7 @@ export default function BlockEditor({
         },
       }),
       CustomImage,
+      Gallery,
       Typography,
       TaskList,
       TaskItem.configure({ nested: true }),
@@ -161,126 +169,8 @@ export default function BlockEditor({
       SlashCommand.configure({
         suggestion: {
           items: ({ query }) => {
-            return [
-              {
-                title: 'Bold',
-                description: 'Make text bold',
-                icon: <Bold className="icon-small" />,
-                command: ({ editor, range }) => {
-                  editor.chain().focus().deleteRange(range).setMark('bold').run();
-                },
-              },
-              {
-                title: 'Italic',
-                description: 'Make text italic',
-                icon: <Italic className="icon-small" />,
-                command: ({ editor, range }) => {
-                  editor.chain().focus().deleteRange(range).setMark('italic').run();
-                },
-              },
-              {
-                title: 'Link',
-                description: 'Add a hyperlink',
-                icon: <LinkIcon className="icon-small" />,
-                command: ({ editor, range }) => {
-                  const url = window.prompt('Enter URL');
-                  if (url) {
-                    editor.chain().focus().deleteRange(range).setLink({ href: url }).run();
-                  }
-                },
-              },
-              {
-                title: 'Heading 1',
-                description: 'Large title block',
-                icon: <Heading1 className="icon-small" />,
-                command: ({ editor, range }) => {
-                  editor.chain().focus().deleteRange(range).setNode('heading', { level: 1 }).run();
-                },
-              },
-              {
-                title: 'Heading 2',
-                description: 'Medium section heading',
-                icon: <Heading2 className="icon-small" />,
-                command: ({ editor, range }) => {
-                  editor.chain().focus().deleteRange(range).setNode('heading', { level: 2 }).run();
-                },
-              },
-              {
-                title: 'Heading 3',
-                description: 'Small section heading',
-                icon: <Heading3 className="icon-small" />,
-                command: ({ editor, range }) => {
-                  editor.chain().focus().deleteRange(range).setNode('heading', { level: 3 }).run();
-                },
-              },
-              {
-                title: 'Bullet List',
-                description: 'Create a simple list',
-                icon: <List className="icon-small" />,
-                command: ({ editor, range }) => {
-                  editor.chain().focus().deleteRange(range).toggleBulletList().run();
-                },
-              },
-              {
-                title: 'Ordered List',
-                description: 'Number your points',
-                icon: <ListOrdered className="icon-small" />,
-                command: ({ editor, range }) => {
-                  editor.chain().focus().deleteRange(range).toggleOrderedList().run();
-                },
-              },
-              {
-                title: 'Quote',
-                description: 'Insert a blockquote',
-                icon: <Quote className="icon-small" />,
-                command: ({ editor, range }) => {
-                  editor.chain().focus().deleteRange(range).toggleBlockquote().run();
-                },
-              },
-              {
-                title: 'Code Block',
-                description: 'Capture a code snippet',
-                icon: <Code className="icon-small" />,
-                command: ({ editor, range }) => {
-                  editor.chain().focus().deleteRange(range).toggleCodeBlock().run();
-                },
-              },
-              {
-                title: 'Math Block',
-                description: 'Insert LaTeX mathematics',
-                icon: <Sigma className="icon-small" />,
-                command: ({ editor, range }) => {
-                  editor.chain().focus().deleteRange(range).setMath().run();
-                },
-              },
-              {
-                title: 'Citation',
-                description: 'Reference a source',
-                icon: <Bookmark className="icon-small" />,
-                command: ({ editor, range }) => {
-                  toast.custom((t) => <CitationToast t={t} editor={editor} range={range} />, { duration: 10000 });
-                },
-              },
-              {
-                title: 'Image',
-                description: 'Upload from your computer',
-                icon: <ImageIcon className="icon-small" />,
-                command: ({ editor, range }) => {
-                  setOnImageSelected(() => (src) => {
-                    editor.chain().focus().deleteRange(range).setImage({ src }).run();
-                  });
-                  setTimeout(() => fileInputRef.current?.click(), 0);
-                },
-              },
-              {
-                title: 'Task List',
-                description: 'Track progress with tasks',
-                icon: <CheckCircle2 className="icon-small" />,
-                command: ({ editor, range }) => {
-                  editor.chain().focus().deleteRange(range).toggleTaskList().run();
-                },
-              },
-            ].filter(item => item.title.toLowerCase().startsWith(query.toLowerCase()));
+            const items = getCommandItems();
+            return items.filter(item => item.title.toLowerCase().startsWith(query.toLowerCase()));
           },
           render: () => {
             let component;
@@ -338,53 +228,13 @@ export default function BlockEditor({
     ],
     content,
     onUpdate: ({ editor }) => {
-      onChange?.(editor.getHTML());
+      const json = editor.getJSON();
+      queueMicrotask(() => onChange?.(json));
     },
     onCreate: ({ editor }) => {
       onEditorReady?.(editor);
     },
     editorProps: {
-      handleDrop: (view, event, slice, moved) => {
-        if (!moved && event.dataTransfer && event.dataTransfer.files && event.dataTransfer.files[0]) {
-          const file = event.dataTransfer.files[0];
-          if (file.type.startsWith('image/')) {
-            const reader = new FileReader();
-            reader.onload = (e) => {
-              const src = e.target?.result;
-              const { schema } = view.state;
-              const coordinates = view.posAtCoords({ left: event.clientX, top: event.clientY });
-              if (coordinates) {
-                const node = schema.nodes.image.create({ src });
-                const transaction = view.state.tr.insert(coordinates.pos, node);
-                view.dispatch(transaction);
-              }
-            };
-            reader.readAsDataURL(file);
-            return true;
-          }
-        }
-        return false;
-      },
-      handlePaste: (view, event) => {
-        const items = Array.from(event.clipboardData?.items || []);
-        for (const item of items) {
-          if (item.type.startsWith('image/')) {
-            const file = item.getAsFile();
-            if (file) {
-              const reader = new FileReader();
-              reader.onload = (e) => {
-                const src = e.target?.result;
-                const node = view.state.schema.nodes.image.create({ src });
-                const transaction = view.state.tr.replaceSelectionWith(node);
-                view.dispatch(transaction);
-              };
-              reader.readAsDataURL(file);
-              return true;
-            }
-          }
-        }
-        return false;
-      },
       attributes: {
         class: `prose-editor ${isPreviewMode ? 'blog-details-article-prose prose-preview' : ''}`,
       },
@@ -400,7 +250,12 @@ export default function BlockEditor({
 
   // Sync content when it changes from outside (e.g. switching modes)
   useEffect(() => {
-    if (editor && content !== editor.getHTML()) {
+    if (!editor) return;
+
+    const nextSignature = getContentSignature(content);
+    const currentSignature = JSON.stringify(editor.getJSON());
+
+    if (nextSignature !== currentSignature) {
       editor.commands.setContent(content, false);
     }
   }, [content, editor]);
@@ -408,11 +263,20 @@ export default function BlockEditor({
   const setLink = useCallback(() => {
     if (editor) {
       if (linkUrl === '') {
-        editor.chain().focus().extendMarkRange('link').unsetLink().run();
+        if (linkRangeRef.current) {
+          editor.chain().focus().deleteRange(linkRangeRef.current).run();
+        } else {
+          editor.chain().focus().extendMarkRange('link').unsetLink().run();
+        }
       } else {
-        editor.chain().focus().extendMarkRange('link').setLink({ href: linkUrl }).run();
+        if (linkRangeRef.current) {
+          editor.chain().focus().deleteRange(linkRangeRef.current).setLink({ href: linkUrl }).run();
+        } else {
+          editor.chain().focus().extendMarkRange('link').setLink({ href: linkUrl }).run();
+        }
       }
       setLinkUrl('');
+      linkRangeRef.current = null;
       setShowLinkInput(false);
     }
   }, [editor, linkUrl]);
@@ -421,6 +285,211 @@ export default function BlockEditor({
     editor.chain().focus().updateAttributes('image', { alt: altText }).run();
     setShowAltInput(false);
   }, [editor, altText]);
+
+  // Shared command items
+  const getCommandItems = useCallback(() => {
+    return [
+      // Headings
+      {
+        title: 'H1',
+        description: 'Large heading',
+        icon: <Heading1 className="icon-small" />,
+        command: ({ editor, range }) => {
+          if (range) {
+            editor.chain().focus().deleteRange(range).setHeading({ level: 1 }).run();
+          } else {
+            editor.chain().focus().setHeading({ level: 1 }).run();
+          }
+        },
+      },
+      {
+        title: 'H2',
+        description: 'Medium heading',
+        icon: <Heading2 className="icon-small" />,
+        command: ({ editor, range }) => {
+          if (range) {
+            editor.chain().focus().deleteRange(range).setHeading({ level: 2 }).run();
+          } else {
+            editor.chain().focus().setHeading({ level: 2 }).run();
+          }
+        },
+      },
+      {
+        title: 'H3',
+        description: 'Small heading',
+        icon: <Heading3 className="icon-small" />,
+        command: ({ editor, range }) => {
+          if (range) {
+            editor.chain().focus().deleteRange(range).setHeading({ level: 3 }).run();
+          } else {
+            editor.chain().focus().setHeading({ level: 3 }).run();
+          }
+        },
+      },
+      // Text Formatting
+      {
+        title: 'Bold',
+        description: 'Make text bold',
+        icon: <Bold className="icon-small" />,
+        command: ({ editor, range }) => {
+          if (range) {
+            editor.chain().focus().deleteRange(range).setMark('bold').run();
+          } else {
+            editor.chain().focus().toggleBold().run();
+          }
+        },
+      },
+      {
+        title: 'Italic',
+        description: 'Make text italic',
+        icon: <Italic className="icon-small" />,
+        command: ({ editor, range }) => {
+          if (range) {
+            editor.chain().focus().deleteRange(range).setMark('italic').run();
+          } else {
+            editor.chain().focus().toggleItalic().run();
+          }
+        },
+      },
+      {
+        title: 'Strikethrough',
+        description: 'Strike through text',
+        icon: <Strikethrough className="icon-small" />,
+        command: ({ editor, range }) => {
+          if (range) {
+            editor.chain().focus().deleteRange(range).setMark('strike').run();
+          } else {
+            editor.chain().focus().toggleStrike().run();
+          }
+        },
+      },
+      {
+        title: 'Link',
+        description: 'Add a hyperlink',
+        icon: <LinkIcon className="icon-small" />,
+        command: ({ editor, range }) => {
+          linkRangeRef.current = range || null;
+          setLinkUrl('');
+          setShowLinkInput(true);
+        },
+      },
+      // Alignment
+      {
+        title: 'Left',
+        description: 'Align left',
+        icon: <AlignLeft className="icon-small" />,
+        command: ({ editor }) => {
+          editor.chain().focus().setTextAlign('left').run();
+        },
+      },
+      {
+        title: 'Center',
+        description: 'Align center',
+        icon: <AlignCenter className="icon-small" />,
+        command: ({ editor }) => {
+          editor.chain().focus().setTextAlign('center').run();
+        },
+      },
+      {
+        title: 'Right',
+        description: 'Align right',
+        icon: <AlignRight className="icon-small" />,
+        command: ({ editor }) => {
+          editor.chain().focus().setTextAlign('right').run();
+        },
+      },
+      // Lists & Quotes
+      {
+        title: 'Bullet List',
+        description: 'Create a simple list',
+        icon: <List className="icon-small" />,
+        command: ({ editor, range }) => {
+          if (range) {
+            editor.chain().focus().deleteRange(range).toggleBulletList().run();
+          } else {
+            editor.chain().focus().toggleBulletList().run();
+          }
+        },
+      },
+      {
+        title: 'Ordered List',
+        description: 'Number your points',
+        icon: <ListOrdered className="icon-small" />,
+        command: ({ editor, range }) => {
+          if (range) {
+            editor.chain().focus().deleteRange(range).toggleOrderedList().run();
+          } else {
+            editor.chain().focus().toggleOrderedList().run();
+          }
+        },
+      },
+      {
+        title: 'Quote',
+        description: 'Insert a blockquote',
+        icon: <Quote className="icon-small" />,
+        command: ({ editor, range }) => {
+          if (range) {
+            editor.chain().focus().deleteRange(range).toggleBlockquote().run();
+          } else {
+            editor.chain().focus().toggleBlockquote().run();
+          }
+        },
+      },
+      {
+        title: 'Task List',
+        description: 'Track progress with tasks',
+        icon: <CheckCircle2 className="icon-small" />,
+        command: ({ editor, range }) => {
+          if (range) {
+            editor.chain().focus().deleteRange(range).toggleTaskList().run();
+          } else {
+            editor.chain().focus().toggleTaskList().run();
+          }
+        },
+      },
+      // Blocks
+      {
+        title: 'Code Block',
+        description: 'Capture a code snippet',
+        icon: <Code className="icon-small" />,
+        command: ({ editor, range }) => {
+          if (range) {
+            editor.chain().focus().deleteRange(range).toggleCodeBlock().run();
+          } else {
+            editor.chain().focus().toggleCodeBlock().run();
+          }
+        },
+      },
+      {
+        title: 'Math Block',
+        description: 'Insert LaTeX mathematics',
+        icon: <Sigma className="icon-small" />,
+        command: ({ editor, range }) => {
+          if (range) {
+            editor.chain().focus().deleteRange(range).setMath().run();
+          } else {
+            editor.chain().focus().setMath().run();
+          }
+        },
+      },
+      {
+        title: 'Citation',
+        description: 'Reference a source',
+        icon: <Bookmark className="icon-small" />,
+        command: ({ editor, range }) => {
+          toast.custom((t) => <CitationToast t={t} editor={editor} range={range} />, { duration: 10000 });
+        },
+      },
+      {
+        title: 'Library',
+        description: 'Browse your image library',
+        icon: <Images className="icon-small" />,
+        command: () => {
+          onOpenLibrary?.();
+        },
+      },
+    ];
+  }, [onOpenLibrary]);
 
   if (!editor) return null;
 
@@ -530,30 +599,17 @@ export default function BlockEditor({
                       </div>
                     </div>
                     <div className="upload-group">
-                      <label>Local Upload</label>
-                      <label className="btn-upload-local">
+                      <label>Image Library</label>
+                      <button
+                        type="button"
+                        className="btn-upload-local"
+                        onClick={() => onOpenLibrary?.('cover')}
+                      >
                         <ImageIcon className="icon-small" />
-                        Choose File
-                        <input
-                          type="file"
-                          className="hidden-file-input"
-                          accept="image/*"
-                          onChange={(e) => {
-                            const file = e.target.files?.[0];
-                            if (file) {
-                              const reader = new FileReader();
-                              reader.onload = (event) => {
-                                if (event.target?.result) {
-                                  onCoverImageChange?.(event.target.result);
-                                  setShowCoverInput(false);
-                                }
-                              };
-                              reader.readAsDataURL(file);
-                            }
-                          }}
-                        />
-                      </label>
+                        Browse Library
+                      </button>
                     </div>
+
                   </div>
                 </div>
               )}
@@ -572,18 +628,6 @@ export default function BlockEditor({
             </h1>
 
             <div className="blog-details-hero-meta">
-              {author && (
-                <div className="blog-details-author-group">
-                  <div className="blog-details-avatar-ring">
-                    <img src={author.avatar} alt={author.name} className="blog-details-author-avatar" />
-                  </div>
-                  <div className="blog-details-author-info">
-                    <span className="blog-details-author-name">{author.name}</span>
-                    <span className="blog-details-author-role">{author.role || 'Editorial Team'}</span>
-                  </div>
-                </div>
-              )}
-
               <div className="blog-details-meta-details">
                 <div className="blog-details-meta-item">
                   <span className="blog-details-meta-label">Published</span>
@@ -618,22 +662,83 @@ export default function BlockEditor({
         )}
       </div>
       )}
+      {showLinkInput && (
+        <div className="citation-popup-toast" onClick={(e) => e.stopPropagation()}>
+          <div className="citation-popup-header">
+            <LinkIcon className="icon-small" />
+            <span>Add Link</span>
+          </div>
+          <div className="citation-popup-input-wrap">
+            <input
+              autoFocus
+              type="url"
+              value={linkUrl}
+              placeholder="https://example.com"
+              className="citation-popup-input"
+              onChange={(e) => setLinkUrl(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  setLink();
+                } else if (e.key === 'Escape') {
+                  e.preventDefault();
+                  setShowLinkInput(false);
+                  linkRangeRef.current = null;
+                  setLinkUrl('');
+                }
+              }}
+            />
+            <button className="citation-popup-btn" onClick={(e) => { e.preventDefault(); setLink(); }}>
+              <Send className="icon-small" />
+            </button>
+          </div>
+        </div>
+      )}
       {/* Static Toolbar removed per user request for a minimal interface */}
 
-      {/* Bubble Menu (Selection-based formatting) — Now matches the full CommandList design */}
+      {/* Bubble Menu (Selection-based formatting) */}
       <BubbleMenu
         editor={editor}
         tippyOptions={{
           duration: 100,
+          placement: 'top',
+          offset: [0, 12],
+          interactive: true,
+          popperOptions: {
+            modifiers: [
+              {
+                name: 'flip',
+                options: {
+                  fallbackPlacements: ['bottom'],
+                },
+              },
+              {
+                name: 'shift',
+                options: {
+                  padding: 8,
+                },
+              },
+              {
+                name: 'preventOverflow',
+                options: {
+                  boundary: 'viewport',
+                  padding: 8,
+                },
+              },
+            ],
+          },
           onHide: () => {
             setShowLinkInput(false);
             setShowHeadingLevels(false);
           }
         }}
-        shouldShow={({ editor }) => {
+        shouldShow={({ editor, state }) => {
           if (isPreviewMode) return false;
           if (editor.isActive('image') || editor.isActive('math')) return false;
-          return !editor.state.selection.empty;
+          if (state.selection.empty) {
+            return false;
+          }
+          return !state.selection.empty;
         }}
         className={`tiptap-menu bubble-menu-full-design ${isPreviewMode ? 'hidden' : ''}`}
       >
@@ -679,93 +784,23 @@ export default function BlockEditor({
                 </button>
               </>
             ) : (
-              <>
-                <button
-                  onClick={() => editor.chain().focus().toggleBold().run()}
-                  className={`command-item ${editor.isActive('bold') ? 'selected' : ''}`}
-                >
-                  <div className={`command-icon-wrap ${editor.isActive('bold') ? 'selected' : ''}`}>
-                    <Bold className="icon-small" />
-                  </div>
-                  <div className="command-text-wrap">
-                    <span className="command-title">Bold</span>
-                    <span className="command-desc">Text</span>
-                  </div>
-                </button>
-
-                <button
-                  onClick={() => editor.chain().focus().toggleItalic().run()}
-                  className={`command-item ${editor.isActive('italic') ? 'selected' : ''}`}
-                >
-                  <div className={`command-icon-wrap ${editor.isActive('italic') ? 'selected' : ''}`}>
-                    <Italic className="icon-small" />
-                  </div>
-                  <div className="command-text-wrap">
-                    <span className="command-title">Italic</span>
-                    <span className="command-desc">Text</span>
-                  </div>
-                </button>
-
-                <button
-                  onClick={() => {
-                    const prev = editor.getAttributes('link').href;
-                    setLinkUrl(prev || '');
-                    setShowLinkInput(true);
-                  }}
-                  className={`command-item ${editor.isActive('link') ? 'selected' : ''}`}
-                >
-                  <div className={`command-icon-wrap ${editor.isActive('link') ? 'selected' : ''}`}>
-                    <LinkIcon className="icon-small" />
-                  </div>
-                  <div className="command-text-wrap">
-                    <span className="command-title">Link</span>
-                    <span className="command-desc">URL</span>
-                  </div>
-                </button>
-
-                <button
-                  onClick={() => {
-                    toast.custom((t) => <CitationToast t={t} editor={editor} />, { duration: 10000 });
-                  }}
-                  className={`command-item ${editor.isActive('citation') ? 'selected' : ''}`}
-                >
-                  <div className={`command-icon-wrap ${editor.isActive('citation') ? 'selected' : ''}`}>
-                    <Bookmark className="icon-small" />
-                  </div>
-                  <div className="command-text-wrap">
-                    <span className="command-title">Cite</span>
-                    <span className="command-desc">Ref</span>
-                  </div>
-                </button>
-
-                <button
-                  onClick={() => editor.chain().focus().setMath().run()}
+              getCommandItems().map((item, itemIdx) => (
+                <button 
+                  key={itemIdx}
                   className="command-item"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    item.command({ editor });
+                  }}
                 >
-                  <div className="command-icon-wrap">
-                    <Sigma className="icon-small" />
-                  </div>
+                  <div className="command-icon-wrap">{item.icon}</div>
                   <div className="command-text-wrap">
-                    <span className="command-title">Math</span>
-                    <span className="command-desc">Formula</span>
+                    <span className="command-title">{item.title}</span>
+                    <span className="command-desc">{item.description}</span>
                   </div>
                 </button>
-
-                <div className="toolbar-divider" />
-
-                <button
-                  onClick={() => setShowHeadingLevels(true)}
-                  className={`command-item ${editor.isActive('heading') ? 'selected' : ''}`}
-                >
-                  <div className={`command-icon-wrap ${editor.isActive('heading') ? 'selected' : ''}`}>
-                    <Heading1 className="icon-small" />
-                  </div>
-                  <div className="command-text-wrap">
-                    <span className="command-title">Headings</span>
-                    <span className="command-desc">Levels</span>
-                  </div>
-                </button>
-              </>
+              ))
             )}
           </div>
         </div>
@@ -779,14 +814,6 @@ export default function BlockEditor({
       >
         <EditorContent editor={editor} />
       </div>
-
-      <input
-        type="file"
-        ref={fileInputRef}
-        onChange={handleFileSelect}
-        accept="image/*"
-        className="hidden-file-input"
-      />
 
       {!isPreviewMode && (
         <div className="floating-history-pill">
