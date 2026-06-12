@@ -381,7 +381,8 @@ async function getAllSanityPosts() {
       "_updatedAt": _updatedAt,
       "coverImage": mainImage.asset->url,
       "tags": tags,
-      readTime
+      readTime,
+      "authorName": author->name
     }`);
     return posts;
   } catch (err) {

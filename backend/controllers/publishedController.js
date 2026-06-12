@@ -24,7 +24,7 @@ exports.listPublished = async (req, res) => {
       category: 'Blog',
       tags: sp.tags || [],
       status: 'approved',
-      author: { name: 'Sanity Admin' }, // Default for sanity-only
+      author: { name: sp.authorName || 'Sanity Admin' }, // Default for sanity-only
       sanityId: sp._id,
       sanityUrl: `https://${process.env.SANITY_PROJECT_ID}.api.sanity.io/v2024-01-01/data/query/${process.env.SANITY_DATASET}?query=*[_id=='${sp._id}'][0]`,
       readTime: sp.readTime || '5 min read',
@@ -163,7 +163,7 @@ exports.getPublishedStats = async (req, res) => {
     // Top authors mapping
     const authorCounts = {};
     combined.forEach(s => {
-      const name = s.author?.name || 'Sanity Admin';
+      const name = s.author?.name || s.authorName || 'Sanity Admin';
       authorCounts[name] = (authorCounts[name] || 0) + 1;
     });
 

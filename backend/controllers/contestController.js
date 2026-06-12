@@ -53,6 +53,7 @@ function classifyImageStatus(contest) {
 
   if (!hasPrimary) return 'no_image';
   if (lastStatus === 'broken' || lastStatus === 'error') return 'broken';
+  if (!lastStatus || lastStatus === 'unknown') return 'unknown';
   if (!hasBackup && hasPrimary) return 'no_backup';
   if (lastStatus === 'active' || lastStatus === 'healthy') return 'healthy';
   return 'unknown';
@@ -133,11 +134,27 @@ exports.getImagesHealth = async (req, res) => {
       ];
     }
 
-    const total = await Contest.countDocuments(query);
-    const pages = Math.max(1, Math.ceil(total / limit));
+    // 1. Fetch all matching items minimally to compute accurate global stats and filter
+    const allImages = await Contest.find(query).select('image').lean();
+    
+    const stats = { total: allImages.length, healthy: 0, broken: 0, noBackup: 0, noImage: 0, unknown: 0 };
+    const filteredIds = [];
 
+    for (const c of allImages) {
+      const status = classifyImageStatus(c);
+      if (stats[status] !== undefined) stats[status]++;
+      
+      if (filter === 'all' || filter === status) {
+        filteredIds.push(c._id);
+      }
+    }
+
+    const totalFiltered = filteredIds.length;
+    const pages = Math.max(1, Math.ceil(totalFiltered / limit));
+
+    // 2. Fetch only the requested page from the filtered results
     const sortField = sortBy === 'source' ? 'source.name' : sortBy;
-    const contests = await Contest.find(query)
+    const contests = await Contest.find({ _id: { $in: filteredIds } })
       .select('title category source link image status')
       .sort({ [sortField]: sortOrder, _id: 1 })
       .skip((page - 1) * limit)
@@ -171,30 +188,10 @@ exports.getImagesHealth = async (req, res) => {
       };
     });
 
-    const stats = {
-      total,
-      healthy: mapped.filter((c) => c.imageStatus === 'healthy').length,
-      broken: mapped.filter((c) => c.imageStatus === 'broken').length,
-      noBackup: mapped.filter((c) => c.imageStatus === 'no_backup').length,
-      noImage: mapped.filter((c) => c.imageStatus === 'no_image').length,
-      unknown: mapped.filter((c) => c.imageStatus === 'unknown').length,
-    };
-
-    if (filter !== 'all') {
-      const filtered = mapped.filter((c) => c.imageStatus === filter);
-      res.json({
-        success: true,
-        contests: filtered,
-        pagination: { total: filtered.length, pages: 1 },
-        stats,
-      });
-      return;
-    }
-
     res.json({
       success: true,
       contests: mapped,
-      pagination: { total, pages },
+      pagination: { total: totalFiltered, pages },
       stats,
     });
   } catch (error) {
@@ -292,12 +289,87 @@ exports.bulkRecheck = async (req, res) => {
 /**
  * POST /api/admin/contests/images/upload
  * Upload a replacement image for a contest.
- * Accepts multipart/form-data with:
- *   - contestId (string, required)
- *   - image (file, required)
- *
- * Processes the image through sharp → WebP 80% (+ AVIF 50% best-effort),
- * uploads to Cloudflare R2, and updates the contest's MongoDB record.
+async function processAndUploadImageToR2(rawBuffer, contestId) {
+  const client = getR2Client();
+  if (!client) {
+    throw new Error('R2 storage not configured. Contact administrator.');
+  }
+
+  const bucket = getBucketName();
+  const publicBase = getR2PublicBase();
+  const contestKey = `contests/${contestId}`;
+
+  // Process with sharp — convert to WebP
+  const webpBuffer = await sharp(rawBuffer)
+    .webp({ quality: 80, effort: 4 })
+    .toBuffer();
+
+  const metadata = await sharp(rawBuffer).metadata();
+
+  // Upload WebP to R2
+  const webpKey = `${contestKey}/primary.webp`;
+  await client.send(new PutObjectCommand({
+    Bucket: bucket,
+    Key: webpKey,
+    Body: webpBuffer,
+    ContentType: 'image/webp',
+    CacheControl: 'public, max-age=31536000, immutable',
+  }));
+
+  const r2Url = `${publicBase}/${webpKey}`;
+
+  // Best-effort AVIF conversion
+  let avifBuffer = null;
+  let avifKey = null;
+  try {
+    avifBuffer = await sharp(rawBuffer).avif({ quality: 50, effort: 4 }).toBuffer();
+    avifKey = `${contestKey}/primary.avif`;
+    await client.send(new PutObjectCommand({
+      Bucket: bucket,
+      Key: avifKey,
+      Body: avifBuffer,
+      ContentType: 'image/avif',
+      CacheControl: 'public, max-age=31536000, immutable',
+    }));
+  } catch (avifErr) {
+    console.warn(`AVIF conversion skipped for contest ${contestId}: ${avifErr.message}`);
+  }
+
+  // Compute SHA256 of original for dedup
+  const sha256 = crypto.createHash('sha256').update(rawBuffer).digest('hex');
+
+  // Update MongoDB
+  const updateFields = {
+    'image.primary.url': r2Url,
+    'image.primary.source': 'r2',
+    'image.primary.status': 'active',
+    'image.primary.fileSize': webpBuffer.length,
+    'image.primary.sha256': sha256,
+    'image.primary.lastCheckedAt': new Date().toISOString(),
+    'image.backup': r2Url,
+    'image.backupFormat': 'webp',
+  };
+
+  if (avifBuffer) {
+    const avifUrl = `${publicBase}/${avifKey}`;
+    updateFields['image.primary.variants'] = {
+      webp: { url: r2Url, size: webpBuffer.length },
+      avif: { url: avifUrl, size: avifBuffer.length },
+    };
+    updateFields['image.backupAvif'] = avifUrl;
+  }
+
+  await Contest.updateOne(
+    { _id: contestId },
+    { $set: updateFields }
+  );
+
+  return { r2Url, webpBuffer, metadata, updateFields, sha256 };
+}
+
+/**
+ * POST /api/admin/contests/images/upload
+ * Upload a replacement image for a contest.
  */
 exports.uploadContestImage = async (req, res) => {
   try {
@@ -322,87 +394,12 @@ exports.uploadContestImage = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Image must be under 15MB' });
     }
 
-    // Fetch the contest to verify it exists and get details
     const contest = await Contest.findById(contestId).lean();
     if (!contest) {
       return res.status(404).json({ success: false, message: 'Contest not found' });
     }
 
-    // Initialize R2 client
-    const client = getR2Client();
-    if (!client) {
-      return res.status(500).json({ success: false, message: 'R2 storage not configured. Contact administrator.' });
-    }
-
-    const bucket = getBucketName();
-    const publicBase = getR2PublicBase();
-    const contestKey = `contests/${contestId}`;
-
-    // Process with sharp — convert to WebP
-    const rawBuffer = file.buffer;
-    const webpBuffer = await sharp(rawBuffer)
-      .webp({ quality: 80, effort: 4 })
-      .toBuffer();
-
-    const metadata = await sharp(rawBuffer).metadata();
-
-    // Upload WebP to R2
-    const webpKey = `${contestKey}/primary.webp`;
-    await client.send(new PutObjectCommand({
-      Bucket: bucket,
-      Key: webpKey,
-      Body: webpBuffer,
-      ContentType: 'image/webp',
-      CacheControl: 'public, max-age=31536000, immutable',
-    }));
-
-    const r2Url = `${publicBase}/${webpKey}`;
-
-    // Best-effort AVIF conversion
-    let avifBuffer = null;
-    let avifKey = null;
-    try {
-      avifBuffer = await sharp(rawBuffer).avif({ quality: 50, effort: 4 }).toBuffer();
-      avifKey = `${contestKey}/primary.avif`;
-      await client.send(new PutObjectCommand({
-        Bucket: bucket,
-        Key: avifKey,
-        Body: avifBuffer,
-        ContentType: 'image/avif',
-        CacheControl: 'public, max-age=31536000, immutable',
-      }));
-    } catch (avifErr) {
-      console.warn(`AVIF conversion skipped for contest ${contestId}: ${avifErr.message}`);
-    }
-
-    // Compute SHA256 of original for dedup
-    const sha256 = crypto.createHash('sha256').update(rawBuffer).digest('hex');
-
-    // Update MongoDB
-    const updateFields = {
-      'image.primary.url': r2Url,
-      'image.primary.source': 'r2',
-      'image.primary.status': 'active',
-      'image.primary.fileSize': webpBuffer.length,
-      'image.primary.sha256': sha256,
-      'image.primary.lastCheckedAt': new Date().toISOString(),
-      'image.backup': r2Url,
-      'image.backupFormat': 'webp',
-    };
-
-    if (avifBuffer) {
-      const avifUrl = `${publicBase}/${avifKey}`;
-      updateFields['image.primary.variants'] = {
-        webp: { url: r2Url, size: webpBuffer.length },
-        avif: { url: avifUrl, size: avifBuffer.length },
-      };
-      updateFields['image.backupAvif'] = avifUrl;
-    }
-
-    await Contest.updateOne(
-      { _id: contestId },
-      { $set: updateFields }
-    );
+    const { r2Url, webpBuffer, metadata, sha256, updateFields } = await processAndUploadImageToR2(file.buffer, contestId);
 
     // Log activity
     try {
@@ -434,6 +431,155 @@ exports.uploadContestImage = async (req, res) => {
     });
   } catch (error) {
     console.error('Contest image upload error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * POST /api/admin/contests/images/backup
+ * Backup a primary image that doesn't have a backup to R2.
+ */
+exports.backupImage = async (req, res) => {
+  try {
+    const { contestId } = req.body;
+    if (!contestId) {
+      return res.status(400).json({ success: false, message: 'contestId is required' });
+    }
+
+    const contest = await Contest.findById(contestId).lean();
+    if (!contest) {
+      return res.status(404).json({ success: false, message: 'Contest not found' });
+    }
+
+    const primaryUrl = contest.image?.primary?.url;
+    if (!primaryUrl) {
+      return res.status(400).json({ success: false, message: 'Contest has no primary image URL' });
+    }
+
+    if (contest.image?.backup) {
+      return res.status(400).json({ success: false, message: 'Contest already has a backup' });
+    }
+
+    // Fetch the image
+    const response = await fetch(primaryUrl);
+    if (!response.ok) {
+      await Contest.updateOne(
+        { _id: contestId },
+        { 
+          $set: { 
+            'image.primary.status': 'broken',
+            'image.primary.lastCheckedAt': new Date().toISOString()
+          } 
+        }
+      );
+      return res.status(400).json({ success: false, message: `Failed to fetch image from URL: ${response.statusText}` });
+    }
+
+    const arrayBuffer = await response.arrayBuffer();
+    const rawBuffer = Buffer.from(arrayBuffer);
+
+    if (rawBuffer.length > 15 * 1024 * 1024) {
+      return res.status(400).json({ success: false, message: 'Image size exceeds 15MB limit' });
+    }
+
+    const { r2Url, webpBuffer, metadata, sha256 } = await processAndUploadImageToR2(rawBuffer, contestId);
+
+    try {
+      await logAction({
+        adminId: req.admin.id,
+        adminName: req.admin.username || req.admin.id,
+        action: 'backup_contest_image',
+        description: `Backed up image for contest: "${contest.title || contestId}"`,
+        targetId: contestId,
+        targetType: 'contest',
+        metadata: { title: contest.title, sha256, format: 'webp', sizeBytes: webpBuffer.length },
+      });
+    } catch (logErr) {
+      console.warn('Failed to log backup activity:', logErr.message);
+    }
+
+    res.json({
+      success: true,
+      message: 'Image backed up successfully',
+      image: {
+        url: r2Url,
+        format: 'webp',
+        sizeBytes: webpBuffer.length,
+        width: metadata.width,
+        height: metadata.height,
+      },
+    });
+
+  } catch (error) {
+    console.error('Contest image backup error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * POST /api/admin/contests/images/bulk-backup
+ * Backup multiple primary images.
+ */
+exports.bulkBackup = async (req, res) => {
+  try {
+    const { contestIds } = req.body;
+    if (!contestIds || !Array.isArray(contestIds) || contestIds.length === 0) {
+      return res.status(400).json({ success: false, message: 'contestIds array is required' });
+    }
+
+    const contests = await Contest.find({ _id: { $in: contestIds } }).lean();
+    const results = { success: 0, failed: 0, errors: [] };
+
+    for (const contest of contests) {
+      const primaryUrl = contest.image?.primary?.url;
+      if (!primaryUrl || contest.image?.backup) {
+        results.failed++;
+        results.errors.push({ id: contest._id, reason: 'No primary URL or already backed up' });
+        continue;
+      }
+
+      try {
+        const response = await fetch(primaryUrl);
+        if (!response.ok) {
+           await Contest.updateOne(
+             { _id: contest._id },
+             { $set: { 'image.primary.status': 'broken', 'image.primary.lastCheckedAt': new Date().toISOString() } }
+           );
+           throw new Error(`HTTP ${response.status} ${response.statusText}`);
+        }
+        
+        const arrayBuffer = await response.arrayBuffer();
+        const rawBuffer = Buffer.from(arrayBuffer);
+        
+        if (rawBuffer.length > 15 * 1024 * 1024) throw new Error('File too large');
+
+        await processAndUploadImageToR2(rawBuffer, contest._id);
+        results.success++;
+      } catch (err) {
+        results.failed++;
+        results.errors.push({ id: contest._id, reason: err.message });
+      }
+    }
+
+    try {
+      await logAction({
+        adminId: req.admin.id,
+        adminName: req.admin.username || req.admin.id,
+        action: 'bulk_backup_contest_images',
+        description: `Bulk backed up ${results.success} contest images`,
+        targetId: 'bulk',
+        targetType: 'system',
+        metadata: { success: results.success, failed: results.failed },
+      });
+    } catch (logErr) {}
+
+    res.json({
+      success: true,
+      message: `Backed up ${results.success} images. Failed: ${results.failed}.`,
+      results,
+    });
+  } catch (error) {
+    console.error('Bulk backup error:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 };

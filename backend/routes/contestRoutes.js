@@ -27,6 +27,8 @@ router.post('/images/bulk-recheck', contestController.bulkRecheck);
 // Contest image upload and details
 router.get('/images/details', contestController.getContestDetails);
 router.post('/images/upload', upload.single('image'), contestController.uploadContestImage);
+router.post('/images/backup', contestController.backupImage);
+router.post('/images/bulk-backup', contestController.bulkBackup);
 
 // Multer error handler
 router.use((err, req, res, next) => {

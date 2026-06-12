@@ -21,6 +21,9 @@ import {
   Eye,
   Upload,
   FileUp,
+  CloudDownload,
+  Copy,
+  Check,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'react-hot-toast';
@@ -107,10 +110,17 @@ const ContestImages = () => {
 
   // Selection and detail state
   const [selectedContest, setSelectedContest] = useState(null);
+  const [selectedContestDetails, setSelectedContestDetails] = useState(null);
+  const [isLoadingSelectedDetails, setIsLoadingSelectedDetails] = useState(false);
+  const [isCopied, setIsCopied] = useState(false);
   const [checkedContests, setCheckedContests] = useState(new Set());
   const [isRechecking, setIsRechecking] = useState(null); // contestId being rechecked
   const [recheckResult, setRecheckResult] = useState(null);
   const [isBulkRechecking, setIsBulkRechecking] = useState(false);
+
+  // Backup state
+  const [isBackingUp, setIsBackingUp] = useState(null);
+  const [isBulkBackingUp, setIsBulkBackingUp] = useState(false);
 
   // Upload state
   const [uploadTarget, setUploadTarget] = useState(null); // contest being uploaded for
@@ -147,8 +157,8 @@ const ContestImages = () => {
   }, [search]);
 
   // Fetch contests
-  const fetchContests = useCallback(async () => {
-    setIsLoading(true);
+  const fetchContests = useCallback(async (silent = false) => {
+    if (!silent) setIsLoading(true);
     try {
       const res = await adminAPI.get('/contests/images/health', {
         params: {
@@ -169,7 +179,7 @@ const ContestImages = () => {
     } catch (err) {
       toast.error(err?.message || 'Failed to load contest images');
     } finally {
-      setIsLoading(false);
+      if (!silent) setIsLoading(false);
     }
   }, [page, debouncedSearch, activeFilter, sortBy, sortOrder]);
 
@@ -196,9 +206,21 @@ const ContestImages = () => {
       if (res.success) {
         setRecheckResult(res.check);
         toast.success(`Check complete: ${res.check.status}`);
-        // Refresh to get updated status
-        if (recheckTimerRef.current) clearTimeout(recheckTimerRef.current);
-        recheckTimerRef.current = setTimeout(() => fetchContests(), 1000);
+        
+        // Update local state directly instead of full refresh
+        setContests(prev => prev.map(c => {
+          if (c.id === contest.id) {
+            return {
+              ...c,
+              imageStatus: res.check.status,
+              image: {
+                ...c.image,
+                lastCheckedAt: new Date().toISOString()
+              }
+            };
+          }
+          return c;
+        }));
       }
     } catch (err) {
       toast.error(err?.message || 'Re-check failed');
@@ -226,13 +248,84 @@ const ContestImages = () => {
         const errors = res.results.filter(r => r.status === 'error' || r.status === 'no_image').length;
         toast.success(`Checked ${res.results.length}: ${alive} alive, ${dead} dead, ${errors} errors`);
         setCheckedContests(new Set());
-        fetchContests();
+        fetchContests(true);
       }
     } catch (err) {
       toast.error(err?.message || 'Bulk re-check failed');
     } finally {
       setIsBulkRechecking(false);
     }
+  };
+
+  // Backup single image
+  const handleBackup = async (contest) => {
+    if (!contest.image?.primaryUrl) return;
+    setIsBackingUp(contest.id);
+    try {
+      const res = await adminAPI.post('/contests/images/backup', { contestId: contest.id });
+      if (res.success) {
+        toast.success('Image backed up successfully');
+        fetchContests(true);
+      }
+    } catch (err) {
+      toast.error(err?.message || 'Backup failed');
+    } finally {
+      setIsBackingUp(null);
+    }
+  };
+
+  // Bulk backup selected
+  const handleBulkBackup = async () => {
+    const ids = Array.from(checkedContests);
+    if (ids.length === 0) return;
+
+    setIsBulkBackingUp(true);
+    try {
+      const res = await adminAPI.post('/contests/images/bulk-backup', { contestIds: ids });
+      if (res.success) {
+        toast.success(res.message || 'Bulk backup complete');
+        setCheckedContests(new Set());
+        fetchContests(true);
+      }
+    } catch (err) {
+      toast.error(err?.message || 'Bulk backup failed');
+    } finally {
+      setIsBulkBackingUp(false);
+    }
+  };
+
+  // Handle opening details panel
+  const handleOpenDetails = async (contest) => {
+    setSelectedContest(contest);
+    setSelectedContestDetails(null);
+    setIsLoadingSelectedDetails(true);
+    try {
+      const res = await adminAPI.get('/contests/images/details', {
+        params: { contestId: contest.id },
+      });
+      if (res.success) {
+        setSelectedContestDetails(res.contest);
+      }
+    } catch (err) {
+      // Ignore, panel will just show less info
+    } finally {
+      setIsLoadingSelectedDetails(false);
+    }
+  };
+
+  const handleCopyContext = () => {
+    if (!selectedContest || !selectedContestDetails) return;
+    
+    let text = `Title: ${selectedContest.title}\n`;
+    if (selectedContest.category) text += `Category: ${selectedContest.category}\n`;
+    if (selectedContestDetails.description) text += `Description: ${selectedContestDetails.description}\n`;
+    if (selectedContestDetails.tags?.length > 0) text += `Tags: ${selectedContestDetails.tags.join(', ')}\n`;
+
+    navigator.clipboard.writeText(text).then(() => {
+      setIsCopied(true);
+      setTimeout(() => setIsCopied(false), 2000);
+      toast.success('Context copied to clipboard');
+    });
   };
 
   // Handle opening the upload modal — fetches full contest details
@@ -311,7 +404,7 @@ const ContestImages = () => {
         setUploadFile(null);
         setUploadPreview(null);
         setContestDetails(null);
-        fetchContests();
+        fetchContests(true);
       }
     } catch (err) {
       toast.error(err?.message || 'Upload failed');
@@ -403,11 +496,11 @@ const ContestImages = () => {
       {/* Stats Summary Cards */}
       <div className="shrink-0 p-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3">
         {[
-          { key: 'total', label: 'Total Contests', value: stats.total, icon: Globe, color: 'text-neutral-550', bg: 'bg-neutral-100 dark:bg-neutral-800/50' },
-          { key: 'healthy', label: 'Healthy', value: stats.healthy, icon: CheckCircle2, color: 'text-emerald-600 dark:text-emerald-550', bg: 'bg-emerald-500/10' },
+          { key: 'total', label: 'Total Contests', value: stats.total, icon: Globe, color: 'text-neutral-500', bg: 'bg-neutral-100 dark:bg-neutral-800/50' },
+          { key: 'healthy', label: 'Healthy', value: stats.healthy, icon: CheckCircle2, color: 'text-emerald-600 dark:text-emerald-500', bg: 'bg-emerald-500/10' },
           { key: 'no_image', label: 'No Image', value: stats.noImage, icon: FileWarning, color: 'text-neutral-500', bg: 'bg-neutral-500/10' },
-          { key: 'no_backup', label: 'No Backup', value: stats.noBackup, icon: AlertTriangle, color: 'text-amber-600 dark:text-amber-550', bg: 'bg-amber-500/10' },
-          { key: 'broken', label: 'Broken', value: stats.broken, icon: Ban, color: 'text-red-600 dark:text-red-550', bg: 'bg-red-500/10' },
+          { key: 'no_backup', label: 'No Backup', value: stats.noBackup, icon: AlertTriangle, color: 'text-amber-600 dark:text-amber-500', bg: 'bg-amber-500/10' },
+          { key: 'broken', label: 'Broken', value: stats.broken, icon: Ban, color: 'text-red-600 dark:text-red-500', bg: 'bg-red-500/10' },
           { key: 'unknown', label: 'Unknown', value: stats.unknown, icon: HelpCircle, color: 'text-neutral-500', bg: 'bg-neutral-500/10' },
         ].map((stat) => (
           <button
@@ -438,7 +531,7 @@ const ContestImages = () => {
       <div className="shrink-0 px-6 pb-4 flex flex-col md:flex-row gap-4 items-center justify-between">
         {/* Search */}
         <div className="w-full md:w-80 relative">
-          <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400 dark:text-neutral-550" />
+          <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400 dark:text-neutral-500" />
           <input
             type="text"
             value={search}
@@ -449,7 +542,7 @@ const ContestImages = () => {
           {search && (
             <button
               onClick={() => { setSearch(''); setDebouncedSearch(''); setPage(1); }}
-              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-750 dark:hover:text-white"
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-800 dark:hover:text-white"
             >
               <X size={12} />
             </button>
@@ -458,7 +551,7 @@ const ContestImages = () => {
 
         <div className="w-full md:w-auto flex flex-wrap items-center gap-3 justify-end">
           {/* Filters */}
-          <div className="p-0.5 rounded-lg bg-neutral-200/50 dark:bg-neutral-950/60 border border-neutral-200/40 dark:border-white/5 flex gap-0.5 shadow-inner">
+          <div className="p-0.5 rounded-lg bg-neutral-200/50 dark:bg-neutral-900/60 border border-neutral-200/40 dark:border-white/5 flex gap-0.5 shadow-inner">
             {FILTER_OPTIONS.map((opt) => (
               <button
                 key={opt.key}
@@ -466,7 +559,7 @@ const ContestImages = () => {
                 className={`px-3 py-1 text-[11px] font-medium rounded-md transition-all ${
                   activeFilter === opt.key
                     ? 'bg-white dark:bg-[#1b1b1e] text-neutral-900 dark:text-white shadow-sm'
-                    : 'text-neutral-500 dark:text-neutral-400 hover:text-neutral-750 dark:hover:text-neutral-350'
+                    : 'text-neutral-500 dark:text-neutral-400 hover:text-neutral-800 dark:hover:text-neutral-300'
                 }`}
               >
                 {opt.label}
@@ -476,18 +569,32 @@ const ContestImages = () => {
 
           {/* Bulk actions */}
           {checkedContests.size > 0 && (
-            <button
-              onClick={handleBulkRecheck}
-              disabled={isBulkRechecking}
-              className="px-3 py-1.5 rounded-lg border border-neutral-200/50 dark:border-white/5 bg-white dark:bg-[#18181b] hover:bg-neutral-50 dark:hover:bg-white/5 text-neutral-600 hover:text-neutral-900 dark:hover:text-white transition-all shadow-sm flex items-center gap-1.5 text-[11px] font-medium disabled:opacity-40"
-            >
-              {isBulkRechecking ? (
-                <Loader2 size={12} className="animate-spin" />
-              ) : (
-                <RefreshCw size={12} />
-              )}
-              Re-check ({checkedContests.size})
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleBulkBackup}
+                disabled={isBulkBackingUp}
+                className="px-3 py-1.5 rounded-lg border border-neutral-200/50 dark:border-white/5 bg-white dark:bg-[#18181b] hover:bg-neutral-50 dark:hover:bg-white/5 text-neutral-600 hover:text-neutral-900 dark:hover:text-white transition-all shadow-sm flex items-center gap-1.5 text-[11px] font-medium disabled:opacity-40"
+              >
+                {isBulkBackingUp ? (
+                  <Loader2 size={12} className="animate-spin" />
+                ) : (
+                  <CloudDownload size={12} />
+                )}
+                Backup ({checkedContests.size})
+              </button>
+              <button
+                onClick={handleBulkRecheck}
+                disabled={isBulkRechecking}
+                className="px-3 py-1.5 rounded-lg border border-neutral-200/50 dark:border-white/5 bg-white dark:bg-[#18181b] hover:bg-neutral-50 dark:hover:bg-white/5 text-neutral-600 hover:text-neutral-900 dark:hover:text-white transition-all shadow-sm flex items-center gap-1.5 text-[11px] font-medium disabled:opacity-40"
+              >
+                {isBulkRechecking ? (
+                  <Loader2 size={12} className="animate-spin" />
+                ) : (
+                  <RefreshCw size={12} />
+                )}
+                Re-check ({checkedContests.size})
+              </button>
+            </div>
           )}
         </div>
       </div>
@@ -553,15 +660,15 @@ const ContestImages = () => {
               </div>
 
               {/* Table Rows */}
-              <div className="divide-y divide-neutral-150 dark:divide-white/5">
+              <div className="divide-y divide-neutral-200/50 dark:divide-white/5">
                 {contests.map((contest) => {
                   const statusCfg = getStatusConfig(contest);
                   const StatusIconCmp = statusCfg.icon;
                   return (
                     <div
                       key={contest.id}
-                      onClick={() => setSelectedContest(contest)}
-                      className={`px-5 py-2.5 flex items-center hover:bg-neutral-50 dark:hover:bg-white/5 transition-colors cursor-pointer text-xs text-neutral-700 dark:text-neutral-350 ${
+                      onClick={() => handleOpenDetails(contest)}
+                      className={`px-5 py-2.5 flex items-center hover:bg-neutral-50 dark:hover:bg-white/5 transition-colors cursor-pointer text-xs text-neutral-700 dark:text-neutral-300 ${
                         selectedContest?.id === contest.id ? 'bg-neutral-100/60 dark:bg-white/5 font-medium' : ''
                       }`}
                     >
@@ -599,7 +706,7 @@ const ContestImages = () => {
                             {contest.category}
                           </span>
                         ) : (
-                          <span className="text-neutral-350">—</span>
+                          <span className="text-neutral-400">—</span>
                         )}
                       </div>
 
@@ -611,7 +718,7 @@ const ContestImages = () => {
                             <span className="truncate text-[10px]">{contest.source.name}</span>
                           </>
                         ) : (
-                          <span className="text-neutral-350">—</span>
+                          <span className="text-neutral-400">—</span>
                         )}
                       </div>
 
@@ -646,9 +753,23 @@ const ContestImages = () => {
 
                       {/* Actions */}
                       <div className="w-[10%] text-right flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
+                        {!contest.image?.backupUrl && contest.image?.primaryUrl && (
+                          <button
+                            onClick={() => handleBackup(contest)}
+                            disabled={isBackingUp === contest.id}
+                            className="p-1.5 rounded hover:bg-blue-500/10 text-neutral-500 hover:text-blue-600 dark:hover:text-blue-400 transition-colors disabled:opacity-30"
+                            title="Backup image to R2"
+                          >
+                            {isBackingUp === contest.id ? (
+                              <Loader2 size={13} className="animate-spin" />
+                            ) : (
+                              <CloudDownload size={13} />
+                            )}
+                          </button>
+                        )}
                         <button
                           onClick={() => handleOpenUpload(contest)}
-                          className="p-1.5 rounded hover:bg-emerald-500/10 text-neutral-450 hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors"
+                          className="p-1.5 rounded hover:bg-emerald-500/10 text-neutral-500 hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors"
                           title="Upload replacement image"
                         >
                           <Upload size={13} />
@@ -656,7 +777,7 @@ const ContestImages = () => {
                         <button
                           onClick={() => handleRecheck(contest)}
                           disabled={isRechecking === contest.id || !contest.image?.primaryUrl}
-                          className="p-1.5 rounded hover:bg-neutral-100 dark:hover:bg-white/5 text-neutral-450 hover:text-neutral-750 dark:hover:text-white transition-colors disabled:opacity-30"
+                          className="p-1.5 rounded hover:bg-neutral-100 dark:hover:bg-white/5 text-neutral-500 hover:text-neutral-800 dark:hover:text-white transition-colors disabled:opacity-30"
                           title={contest.image?.primaryUrl ? 'Re-check image URL' : 'No image URL to check'}
                         >
                           {isRechecking === contest.id ? (
@@ -666,8 +787,8 @@ const ContestImages = () => {
                           )}
                         </button>
                         <button
-                          onClick={() => setSelectedContest(contest)}
-                          className="p-1.5 rounded hover:bg-neutral-100 dark:hover:bg-white/5 text-neutral-450 hover:text-neutral-750 dark:hover:text-white transition-colors"
+                          onClick={() => handleOpenDetails(contest)}
+                          className="p-1.5 rounded hover:bg-neutral-100 dark:hover:bg-white/5 text-neutral-500 hover:text-neutral-800 dark:hover:text-white transition-colors"
                           title="View details"
                         >
                           <Eye size={13} />
@@ -760,7 +881,7 @@ const ContestImages = () => {
                 </span>
                 <button
                   onClick={() => setSelectedContest(null)}
-                  className="p-1 rounded-lg hover:bg-neutral-100 dark:hover:bg-white/5 text-neutral-400 hover:text-neutral-750 dark:hover:text-white transition-colors"
+                  className="p-1 rounded-lg hover:bg-neutral-100 dark:hover:bg-white/5 text-neutral-400 hover:text-neutral-800 dark:hover:text-white transition-colors"
                 >
                   <X size={15} />
                 </button>
@@ -802,10 +923,57 @@ const ContestImages = () => {
                     </div>
                   ) : (
                     <div className="py-10 text-center">
-                      <ImageIcon size={32} className="text-neutral-350 dark:text-neutral-600 mx-auto mb-2" />
+                      <ImageIcon size={32} className="text-neutral-400 dark:text-neutral-600 mx-auto mb-2" />
                       <p className="text-[10px] text-neutral-400">No image available</p>
                     </div>
                   )}
+                </div>
+
+                {/* Context for Generation */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="block text-[9px] font-semibold text-neutral-400 uppercase tracking-wider">Context for Image Generation</span>
+                    {!isLoadingSelectedDetails && selectedContestDetails && (
+                      <button
+                        onClick={handleCopyContext}
+                        className="flex items-center gap-1.5 px-2 py-1 rounded bg-neutral-100 dark:bg-white/5 hover:bg-neutral-200 dark:hover:bg-white/10 text-[9px] font-medium text-neutral-500 hover:text-neutral-800 dark:hover:text-white transition-colors"
+                      >
+                        {isCopied ? <Check size={10} className="text-emerald-500" /> : <Copy size={10} />}
+                        {isCopied ? 'Copied!' : 'Copy'}
+                      </button>
+                    )}
+                  </div>
+                  <div className="bg-neutral-50/50 dark:bg-[#1b1b1e]/30 border border-neutral-200/30 dark:border-white/5 rounded-xl p-3 space-y-2.5">
+                    {isLoadingSelectedDetails ? (
+                      <div className="flex items-center gap-2 py-2">
+                        <Loader2 size={12} className="animate-spin text-neutral-400" />
+                        <span className="text-[10px] text-neutral-400">Loading full details...</span>
+                      </div>
+                    ) : (
+                      <div className="space-y-3 text-[11px]">
+                        <div>
+                          <span className="text-[9px] font-bold text-neutral-400 uppercase block">Description</span>
+                          {selectedContestDetails?.description ? (
+                            <p className="text-neutral-600 dark:text-neutral-400 mt-0.5 leading-relaxed break-words whitespace-pre-line">{selectedContestDetails.description}</p>
+                          ) : (
+                            <span className="text-neutral-400 italic mt-0.5 block">No description</span>
+                          )}
+                        </div>
+                        {selectedContestDetails?.tags?.length > 0 && (
+                          <div>
+                            <span className="text-[9px] font-bold text-neutral-400 uppercase block">Tags</span>
+                            <div className="flex flex-wrap gap-1 mt-1">
+                              {selectedContestDetails.tags.map((tag, i) => (
+                                <span key={i} className="px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800/50 text-[9px] text-neutral-500 dark:text-neutral-400 border border-neutral-200/50 dark:border-white/5">
+                                  {tag}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 {/* Image Source Details */}
@@ -816,7 +984,7 @@ const ContestImages = () => {
                       <ExternalLink size={12} className="text-neutral-400 shrink-0 mt-0.5" />
                       <div className="min-w-0">
                         <span className="text-[8px] font-bold text-neutral-400 uppercase">Primary URL</span>
-                        <p className="text-[10px] font-mono text-neutral-700 dark:text-neutral-350 break-all mt-0.5">
+                        <p className="text-[10px] font-mono text-neutral-700 dark:text-neutral-400 break-all mt-0.5">
                           {selectedContest.image?.primaryUrl || '—'}
                         </p>
                       </div>
@@ -825,7 +993,7 @@ const ContestImages = () => {
                       <div className="flex items-center gap-2">
                         <Globe size={12} className="text-neutral-400 shrink-0" />
                         <span className="text-[10px] text-neutral-500">
-                          Domain: <span className="font-mono text-neutral-700 dark:text-neutral-350">{selectedContest.image.originalDomain}</span>
+                          Domain: <span className="font-mono text-neutral-700 dark:text-neutral-400">{selectedContest.image.originalDomain}</span>
                         </span>
                       </div>
                     )}
@@ -871,7 +1039,7 @@ const ContestImages = () => {
                     {selectedContest.source?.name && (
                       <div className="flex items-center gap-2">
                         <Globe size={12} className="text-neutral-400 shrink-0" />
-                        <span className="text-neutral-700 dark:text-neutral-350 font-medium">{selectedContest.source.name}</span>
+                        <span className="text-neutral-700 dark:text-neutral-400 font-medium">{selectedContest.source.name}</span>
                       </div>
                     )}
                     {selectedContest.source?.url && (
