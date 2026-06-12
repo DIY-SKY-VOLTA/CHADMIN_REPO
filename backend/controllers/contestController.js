@@ -177,6 +177,7 @@ exports.getImagesHealth = async (req, res) => {
       broken: mapped.filter((c) => c.imageStatus === 'broken').length,
       noBackup: mapped.filter((c) => c.imageStatus === 'no_backup').length,
       noImage: mapped.filter((c) => c.imageStatus === 'no_image').length,
+      unknown: mapped.filter((c) => c.imageStatus === 'unknown').length,
     };
 
     if (filter !== 'all') {

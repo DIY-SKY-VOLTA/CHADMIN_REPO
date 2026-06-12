@@ -17,6 +17,7 @@ import {
   Activity,
   Settings,
   ChevronsUpDown,
+  AlertTriangle,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -43,6 +44,7 @@ const sections = [
       { icon: Tag, label: 'Categories', path: '/categories' },
       { icon: ImageIcon, label: 'Media Library', path: '/images' },
       { icon: MessageSquare, label: 'Comments', path: '/comments' },
+      { icon: AlertTriangle, label: 'Contest Images', path: '/contests/images' },
       { icon: Users, label: 'Writers', path: '/users' },
     ],
   },

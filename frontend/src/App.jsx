@@ -14,6 +14,7 @@ import PublishedPage from './pages/Published/Published';
 import AnalyticsPage from './pages/Analytics/Analytics';
 import ActivityLog from './pages/ActivityLog/ActivityLog';
 import SettingsPage from './pages/Settings/Settings';
+import ContestImages from './pages/ContestImages/ContestImages';
 
 // Protected Route Component
 const ProtectedRoute = ({ children }) => {
@@ -77,6 +78,10 @@ function App() {
         <Route 
           path="/activity" 
           element={<ProtectedRoute><ActivityLog /></ProtectedRoute>} 
+        />
+        <Route 
+          path="/contests/images" 
+          element={<ProtectedRoute><ContestImages /></ProtectedRoute>} 
         />
         <Route 
           path="/settings" 
