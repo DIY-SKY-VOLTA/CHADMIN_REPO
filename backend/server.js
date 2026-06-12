@@ -25,7 +25,7 @@ const app = express();
 // Middleware
 app.use(helmet());
 app.use(cors({
-  origin: process.env.FRONTEND_URL,
+  origin: process.env.FRONTEND_URL?.replace(/\/$/, ''),
   credentials: true
 }));
 app.use(express.json());
