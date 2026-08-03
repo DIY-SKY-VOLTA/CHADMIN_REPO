@@ -18,8 +18,9 @@ import {
   Settings,
   ChevronsUpDown,
   AlertTriangle,
+  Trophy,
+  ScrollText,
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
 
 const sections = [
   {
@@ -44,8 +45,15 @@ const sections = [
       { icon: Tag, label: 'Categories', path: '/categories' },
       { icon: ImageIcon, label: 'Media Library', path: '/images' },
       { icon: MessageSquare, label: 'Comments', path: '/comments' },
+      { icon: Trophy, label: 'Contests', path: '/contests', end: true },
       { icon: AlertTriangle, label: 'Contest Images', path: '/contests/images' },
       { icon: Users, label: 'Writers', path: '/users' },
+    ],
+  },
+  {
+    label: 'Pipeline',
+    items: [
+      { icon: ScrollText, label: 'Prompts', path: '/prompts' },
     ],
   },
 ];
@@ -66,7 +74,9 @@ const Sidebar = ({ isDarkMode, onToggleTheme, onClose }) => {
         if (res.success && res.stats) {
           setPendingCount(res.stats.pending);
         }
-      } catch {}
+      } catch {
+        // pending count is optional — ignore fetch failures
+      }
     };
     fetchPending();
     const interval = setInterval(fetchPending, 30000);
@@ -127,6 +137,7 @@ const Sidebar = ({ isDarkMode, onToggleTheme, onClose }) => {
                 <NavLink
                   key={item.path}
                   to={item.path}
+                  end={item.end}
                   onClick={onClose}
                   className={({ isActive }) => `
                     flex items-center gap-2.5 px-2 py-[5px] rounded-[5px] text-[13px] transition-colors group outline-none

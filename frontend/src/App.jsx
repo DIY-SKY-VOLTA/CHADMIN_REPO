@@ -15,6 +15,10 @@ import AnalyticsPage from './pages/Analytics/Analytics';
 import ActivityLog from './pages/ActivityLog/ActivityLog';
 import SettingsPage from './pages/Settings/Settings';
 import ContestImages from './pages/ContestImages/ContestImages';
+import Contests from './pages/Contests/Contests';
+import ContestForm from './pages/Contests/ContestForm';
+import ContestDetailsForm from './pages/Contests/ContestDetailsForm';
+import Prompts from './pages/Prompts/Prompts';
 
 // Protected Route Component
 const ProtectedRoute = ({ children }) => {
@@ -80,8 +84,28 @@ function App() {
           element={<ProtectedRoute><ActivityLog /></ProtectedRoute>} 
         />
         <Route 
+          path="/contests" 
+          element={<ProtectedRoute><Contests /></ProtectedRoute>} 
+        />
+        <Route 
+          path="/contests/new" 
+          element={<ProtectedRoute><ContestForm /></ProtectedRoute>} 
+        />
+        <Route 
+          path="/contests/:id/edit" 
+          element={<ProtectedRoute><ContestForm /></ProtectedRoute>} 
+        />
+        <Route 
+          path="/contests/:id/details" 
+          element={<ProtectedRoute><ContestDetailsForm /></ProtectedRoute>} 
+        />
+        <Route 
           path="/contests/images" 
           element={<ProtectedRoute><ContestImages /></ProtectedRoute>} 
+        />
+        <Route 
+          path="/prompts" 
+          element={<ProtectedRoute><Prompts /></ProtectedRoute>} 
         />
         <Route 
           path="/settings" 

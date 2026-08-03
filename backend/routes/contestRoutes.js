@@ -30,6 +30,20 @@ router.post('/images/upload', upload.single('image'), contestController.uploadCo
 router.post('/images/backup', contestController.backupImage);
 router.post('/images/bulk-backup', contestController.bulkBackup);
 
+// Contest CRUD — admin add / edit / archive
+router.get('/', contestController.listContests);
+router.post('/', contestController.createContest);
+
+// Contest DETAILED GUIDE (contest_details collection) — before /:id so they match
+router.get('/:id/details', contestController.getContestDetails);
+router.put('/:id/details', contestController.saveContestDetails);
+router.delete('/:id/details', contestController.deleteContestDetails);
+
+router.get('/:id', contestController.getContest);
+router.put('/:id', contestController.updateContest);
+router.delete('/:id', contestController.archiveContest);
+router.post('/:id/restore', contestController.restoreContest);
+
 // Multer error handler
 router.use((err, req, res, next) => {
   if (err instanceof multer.MulterError) {

@@ -1,8 +1,15 @@
 const Contest = require('../models/Contests');
+const ContestDetail = require('../models/ContestDetail');
 const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
 const sharp = require('sharp');
 const crypto = require('crypto');
+const mongoose = require('mongoose');
 const { logAction } = require('./activityLogController');
+const {
+  normalizeTags,
+  mapCanonicalCategory,
+  mapSubcategory,
+} = require('../utils/tagNormalizer');
 
 // ─── R2 Client ──────────────────────────────────────────────────────────────
 
@@ -163,7 +170,12 @@ exports.getImagesHealth = async (req, res) => {
 
     const mapped = contests.map((c) => {
       const primaryUrl = c.image?.primary?.url || null;
-      const backupUrl = c.image?.backup || null;
+      // image.backup is the canonical OBJECT { url, source, format, status, createdAt }.
+      // Tolerate legacy string-shaped docs (pre-fix admin-dashboard writes) so the
+      // health dashboard still displays them until the backfill script runs.
+      const rawBackup = c.image?.backup;
+      const backupUrl = (rawBackup && typeof rawBackup === 'object') ? (rawBackup.url || null) : (rawBackup || null);
+      const backupFormat = (rawBackup && typeof rawBackup === 'object') ? (rawBackup.format || null) : null;
       const imageStatus = classifyImageStatus(c);
       let originalDomain = null;
       if (primaryUrl) {
@@ -178,6 +190,7 @@ exports.getImagesHealth = async (req, res) => {
         image: {
           primaryUrl,
           backupUrl,
+          backupFormat,
           alt: c.image?.alt || null,
           tag: c.image?.tag || null,
           originalDomain,
@@ -339,15 +352,28 @@ async function processAndUploadImageToR2(rawBuffer, contestId) {
   const sha256 = crypto.createHash('sha256').update(rawBuffer).digest('hex');
 
   // Update MongoDB
+  // NOTE: image.backup is the CANONICAL OBJECT shape (matches Phase2's R2
+  // contract: { url, source:'r2', format, status, createdAt }). Writing it as a
+  // plain string here silently corrupted the shared Atlas collection — the
+  // Phase2 canonical model and every read path expect an object with .url.
+  // The flat legacy fields (image.backupFormat / image.backupAvif) are removed;
+  // format now lives inside image.backup.format and AVIF lives inside
+  // image.primary.variants.avif (written below).
+  const backupCreatedAt = new Date();
   const updateFields = {
     'image.primary.url': r2Url,
     'image.primary.source': 'r2',
     'image.primary.status': 'active',
     'image.primary.fileSize': webpBuffer.length,
     'image.primary.sha256': sha256,
-    'image.primary.lastCheckedAt': new Date().toISOString(),
-    'image.backup': r2Url,
-    'image.backupFormat': 'webp',
+    'image.primary.lastCheckedAt': backupCreatedAt.toISOString(),
+    'image.backup': {
+      url: r2Url,
+      source: 'r2',
+      format: 'webp',
+      status: 'active',
+      createdAt: backupCreatedAt,
+    },
   };
 
   if (avifBuffer) {
@@ -356,7 +382,6 @@ async function processAndUploadImageToR2(rawBuffer, contestId) {
       webp: { url: r2Url, size: webpBuffer.length },
       avif: { url: avifUrl, size: avifBuffer.length },
     };
-    updateFields['image.backupAvif'] = avifUrl;
   }
 
   await Contest.updateOne(
@@ -626,6 +651,1036 @@ exports.getContestDetails = async (req, res) => {
     });
   } catch (error) {
     console.error('Contest details error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  CONTEST CRUD — Admin Create / Read / Update / Archive
+//
+//  Writes the SAME canonical document shape the automation pipeline uses
+//  (Phase2 backend `models/Contests.js` v3.0 + `Prompts.txt` v4.1 output).
+//  The admin `Contests` model is `strict: false`, so every normalizer below
+//  mirrors the Phase2 model's pre('save') hooks to keep parity exactly:
+//    • slug generation            (kebab-title-XXXXX from ObjectId)
+//    • canonical category / subcategory mapping (tagNormalizer)
+//    • tag normalization          (max 3, type-diverse)
+//    • prize amount normalization (string → number, currency detection)
+//    • auto-feature               (totalUSD >= 50k | official+verified | prestige tag)
+//    • computed status            (open / scheduled / closed from timeline)
+// ═══════════════════════════════════════════════════════════════════════════
+
+const VALID_TYPES = ['contest', 'hackathon'];
+const VALID_STATUS = ['open', 'scheduled', 'closed'];
+const VALID_VERIFICATION = ['verified', 'pending', 'failed'];
+const VALID_MODES = ['online', 'offline', 'in-person', 'hybrid'];
+const VALID_SOURCE_TYPES = ['aggregator', 'direct', 'partner', 'official'];
+const VALID_FLAGS = ['women', 'hero', 'featured', 'all', 'broken-link', 'no-image'];
+
+const PRESTIGIOUS_TAGS = [
+  'oscar-qualifying', 'grammy', 'emmy', 'bAFTA-qualifying', 'cannes', 'venice-film-festival',
+  'sundance', 'tiff', 'sxsw', 'webby', 'red-dot', 'iF-design', 'd&AD', 'one-show', 'clio',
+  'nobel', 'fields-medal', 'turing-award', 'pulitzer', 'rhodes', 'marshall', 'fulbright',
+  'gates-millennium', 'y-combinator', 'techstars', 'unesco', 'world-bank', 'united-nations',
+];
+
+function generateSlug(title, id) {
+  const base = String(title || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, '')
+    .trim()
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .substring(0, 60)
+    .replace(/-$/, '');
+  return `${base}-${String(id).slice(-5)}`;
+}
+
+function detectCurrencyFromString(str) {
+  if (typeof str !== 'string') return null;
+  if (str.includes('NT$')) return 'TWD';
+  const codeMatch = str.match(/\b(USD|EUR|GBP|INR|JPY|CNY|KRW|TWD|AUD|CAD|CHF|SGD|HKD|NZD|SEK|NOK|DKK|BRL|MXN|ZAR|RUB|AED|SAR|THB|MYR|PHP|IDR|VND|TRY|PLN|NGN|KES|EGP|PKR|BDT|LKR|NPR|VND|ILS|CLP|COP|PEN)\b/i);
+  if (codeMatch) return codeMatch[1].toUpperCase();
+  if (str.includes('$')) return 'USD';
+  if (str.includes('€')) return 'EUR';
+  if (str.includes('£')) return 'GBP';
+  if (str.includes('¥')) return 'JPY';
+  return null;
+}
+
+function extractPrizeFromText(text) {
+  if (!text || typeof text !== 'string') return null;
+  const patterns = [
+    /(?:totalling|totaling|total(?:\s+prize)?(?:\s+pool|\s+purse|\s+fund)?\s+(?:of|:)?\s*)\$([\d,]+(?:\.[\d]+)?)/i,
+    /(?:totalling|totaling|total(?:\s+prize)?(?:\s+pool|\s+purse|\s+fund)?\s+(?:of|:)?\s*)€([\d,]+(?:\.[\d]+)?)/i,
+    /(?:totalling|totaling|total(?:\s+prize)?(?:\s+pool|\s+purse|\s+fund)?\s+(?:of|:)?\s*)£([\d,]+(?:\.[\d]+)?)/i,
+    /\$([\d,]+(?:\.[\d]+)?)\s+(?:in\s+)?(?:prize|prizes|award|grant|fellowship|purse)/i,
+    /€([\d,]+(?:\.[\d]+)?)\s+(?:in\s+)?(?:prize|prizes|award|grant|fellowship)/i,
+    /(?:prize|award|grant|fellowship)(?:\s+(?:is|of|:))?\s*\$([\d,]+(?:\.[\d]+)?)/i,
+    /(?:prize|award|grant|fellowship)(?:\s+(?:is|of|:))?\s*€([\d,]+(?:\.[\d]+)?)/i,
+    /\$([\d,]+(?:\.[\d]+)?)\s*(?:USD)?/i,
+    /€([\d,]+(?:\.[\d]+)?)\s*(?:EUR)?/i,
+    /£([\d,]+(?:\.[\d]+)?)\s*(?:GBP)?/i,
+    /([\d,]+(?:\.[\d]+)?)\s*(USD|EUR|GBP)/i,
+  ];
+  for (const regex of patterns) {
+    const match = text.match(regex);
+    if (match) {
+      const cleaned = match[1].replace(/,/g, '');
+      const num = parseFloat(cleaned);
+      if (!isNaN(num) && num > 0) {
+        let currency = 'USD';
+        if (match[0].includes('€')) currency = 'EUR';
+        else if (match[0].includes('£')) currency = 'GBP';
+        else if (match[2]) currency = match[2].toUpperCase();
+        return { amount: num, currency };
+      }
+    }
+  }
+  return null;
+}
+
+function normalizePrizeAmounts(prize) {
+  if (!prize) return;
+
+  if (typeof prize.originalAmount === 'string') {
+    const origStr = prize.originalAmount;
+    const cleaned = origStr.replace(/[^0-9.]/g, '');
+    const numeric = parseFloat(cleaned);
+    prize.originalAmount = (!isNaN(numeric) && numeric > 0) ? numeric : 0;
+    if (!prize.currency || prize.currency === 'USD') {
+      const detected = detectCurrencyFromString(origStr);
+      if (detected && detected !== 'USD') prize.currency = detected;
+    }
+  }
+
+  if (typeof prize.totalUSD === 'string') {
+    const cleaned = prize.totalUSD.replace(/[^0-9.]/g, '');
+    const numeric = parseFloat(cleaned);
+    prize.totalUSD = (!isNaN(numeric) && numeric > 0) ? numeric : 0;
+  }
+
+  if (prize.originalAmount !== undefined && prize.originalAmount !== null && typeof prize.originalAmount !== 'number') {
+    prize.originalAmount = Number(prize.originalAmount) || 0;
+  }
+  if (prize.totalUSD !== undefined && prize.totalUSD !== null && typeof prize.totalUSD !== 'number') {
+    prize.totalUSD = Number(prize.totalUSD) || 0;
+  }
+
+  if (prize.isMonetary && (!prize.totalUSD || prize.totalUSD <= 0)) {
+    const textSource = prize.prizeSummary || prize.description || '';
+    const extracted = extractPrizeFromText(textSource);
+    if (extracted) {
+      let totalUSD = extracted.amount;
+      if (extracted.currency === 'EUR') totalUSD = Math.round(extracted.amount * 1.08);
+      else if (extracted.currency === 'GBP') totalUSD = Math.round(extracted.amount * 1.26);
+      prize.totalUSD = totalUSD;
+      prize.originalAmount = extracted.amount;
+      prize.currency = extracted.currency;
+    }
+  }
+}
+
+function shouldAutoFeature(contest) {
+  if (contest.prize?.totalUSD && Number(contest.prize.totalUSD) >= 50000) return true;
+  if (contest.source?.type === 'official' && contest.verificationStatus === 'verified') return true;
+  if (contest.tags && Array.isArray(contest.tags)) {
+    const tagSet = new Set(contest.tags.map(t => String(t).toLowerCase().trim()));
+    if (PRESTIGIOUS_TAGS.some(pt => tagSet.has(pt))) return true;
+  }
+  return false;
+}
+
+function computeStatusFromDates(contestLike, now = new Date()) {
+  const startValue = contestLike?.timeline?.startUTC || contestLike?.timeline?.startDateUTC;
+  const start = startValue ? new Date(startValue) : null;
+  const deadline = contestLike?.timeline?.submissionDeadlineUTC ? new Date(contestLike.timeline.submissionDeadlineUTC) : null;
+  if (deadline && !isNaN(deadline) && deadline < now) return 'closed';
+  if (start && !isNaN(start) && start > now) return 'scheduled';
+  if (deadline || start) return 'open';
+  return 'open';
+}
+
+function toDate(value) {
+  if (value === undefined || value === null || value === '') return null;
+  const d = new Date(value);
+  return isNaN(d) ? null : d;
+}
+
+function cleanString(value) {
+  if (value === undefined || value === null) return null;
+  const s = String(value).trim();
+  return s === '' ? null : s;
+}
+
+function cleanNumber(value) {
+  if (value === undefined || value === null || value === '') return null;
+  const n = Number(value);
+  return isNaN(n) ? null : n;
+}
+
+function cleanStringArray(value) {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.map(v => String(v).trim()).filter(Boolean))];
+}
+
+function cleanStrings(value) {
+  if (typeof value !== 'object' || value === null) return null;
+  const out = {};
+  for (const [k, v] of Object.entries(value)) {
+    const s = cleanString(v);
+    if (s !== null) out[k] = s;
+  }
+  return Object.keys(out).length > 0 ? out : null;
+}
+
+/**
+ * Merge a raw form payload into a clean, canonical contest document.
+ * Mirrors Phase2 model pre('save') hooks + Prompts.txt v4.1 schema.
+ */
+function normalizeContestPayload(raw) {
+  const doc = {};
+
+  // ── Identity ────────────────────────────────────────────────
+  const title = cleanString(raw.title);
+  if (!title) throw new Error('Title is required');
+  doc.title = title;
+  doc.type = VALID_TYPES.includes(raw.type) ? raw.type : 'contest';
+  doc.description = cleanString(raw.description) || '';
+  doc.descriptionDetailed = cleanString(raw.descriptionDetailed);
+  doc.link = cleanString(raw.link);
+
+  // Category pipeline — rawCategory preserved, canonical mapped (same as model hook)
+  const rawCategory = cleanString(raw.rawCategory) || cleanString(raw.category);
+  if (!rawCategory) throw new Error('Category is required');
+  doc.rawCategory = cleanString(raw.rawCategory) || rawCategory;
+  doc.category = mapCanonicalCategory(rawCategory);
+  doc.subCategory = cleanString(raw.subCategory) ?? mapSubcategory(rawCategory);
+
+  // Tags — normalized with canonical category + filterKeys (max 3, type-diverse)
+  doc.filterKeys = normalizeFilterKeys(raw.filterKeys, doc.category);
+  doc.tags = normalizeTags(raw.tags || [], doc.category, doc.filterKeys);
+
+  // Flags — whitelisted, deduped, auto-feature
+  const flags = cleanStringArray(raw.flags).filter(f => VALID_FLAGS.includes(f));
+  doc.flags = flags;
+  doc.verificationStatus = VALID_VERIFICATION.includes(raw.verificationStatus) ? raw.verificationStatus : 'pending';
+  doc.lastVerifiedAt = toDate(raw.lastVerifiedAt);
+  doc.trendingUntil = toDate(raw.trendingUntil);
+  doc.archivedAt = toDate(raw.archivedAt);
+
+  // ── Image ───────────────────────────────────────────────────
+  const image = {};
+  const primaryUrl = cleanString(raw.image?.primary?.url);
+  if (primaryUrl) {
+    image.primary = {
+      url: primaryUrl,
+      source: ['external', 'uploaded', 'generated', 'r2'].includes(raw.image?.primary?.source) ? raw.image.primary.source : 'external',
+      status: ['active', 'broken', 'pending'].includes(raw.image?.primary?.status) ? raw.image.primary.status : 'active',
+    };
+  } else {
+    image.primary = { url: null, source: 'external', status: 'pending' };
+  }
+  if (raw.image?.backup && typeof raw.image.backup === 'object' && raw.image.backup.url) {
+    image.backup = {
+      url: cleanString(raw.image.backup.url),
+      source: cleanString(raw.image.backup.source) || 'r2',
+      format: cleanString(raw.image.backup.format),
+      status: ['active', 'broken'].includes(raw.image.backup.status) ? raw.image.backup.status : 'active',
+      createdAt: toDate(raw.image.backup.createdAt) || new Date(),
+    };
+  }
+  const alt = cleanString(raw.image?.alt);
+  if (alt) image.alt = alt;
+  const tag = cleanString(raw.image?.tag);
+  if (tag) image.tag = tag;
+  if (Object.keys(image).length > 0) doc.image = image;
+
+  // ── Entry ───────────────────────────────────────────────────
+  const entry = {};
+  if (raw.entry && typeof raw.entry === 'object') {
+    entry.isFree = raw.entry.isFree === true || raw.entry.isFree === 'true' ? true
+      : raw.entry.isFree === false || raw.entry.isFree === 'false' ? false
+      : null;
+    const feeUSD = cleanNumber(raw.entry.feeUSD);
+    if (feeUSD !== null) entry.feeUSD = feeUSD;
+    entry.feeConfidence = ['confirmed', 'extracted', 'unknown'].includes(raw.entry.feeConfidence) ? raw.entry.feeConfidence : 'unknown';
+    const feeNote = cleanString(raw.entry.feeNote);
+    if (feeNote) entry.feeNote = feeNote;
+    const feeAmount = cleanNumber(raw.entry.fee?.amount);
+    if (feeAmount !== null) {
+      entry.fee = { amount: feeAmount, currency: cleanString(raw.entry.fee?.currency) || 'USD' };
+    }
+    doc.entry = entry;
+  }
+
+  // ── Prize ───────────────────────────────────────────────────
+  if (raw.prize && typeof raw.prize === 'object') {
+    const prize = {};
+    prize.isMonetary = raw.prize.isMonetary === true || raw.prize.isMonetary === 'true' ? true : false;
+    const originalAmount = cleanNumber(raw.prize.originalAmount);
+    if (originalAmount !== null) prize.originalAmount = originalAmount;
+    const totalUSD = cleanNumber(raw.prize.totalUSD);
+    if (totalUSD !== null) prize.totalUSD = totalUSD;
+    const currency = cleanString(raw.prize.currency);
+    if (currency) prize.currency = currency;
+    const prizeSummary = cleanString(raw.prize.prizeSummary);
+    if (prizeSummary) prize.prizeSummary = prizeSummary;
+    const prizeDesc = cleanString(raw.prize.description);
+    if (prizeDesc) prize.description = prizeDesc;
+    const breakdown = cleanString(raw.prize.breakdown);
+    if (breakdown) prize.breakdown = breakdown;
+    normalizePrizeAmounts(prize);
+    doc.prize = prize;
+  }
+
+  // ── Audience ────────────────────────────────────────────────
+  if (raw.audience && typeof raw.audience === 'object') {
+    const audience = {};
+    const eligibilityLabel = cleanString(raw.audience.eligibilityLabel);
+    if (eligibilityLabel) audience.eligibilityLabel = eligibilityLabel;
+    const eligibilityDetail = cleanString(raw.audience.eligibilityDetail);
+    if (eligibilityDetail) audience.eligibilityDetail = eligibilityDetail;
+    if (VALID_MODES.includes(raw.audience.mode)) audience.mode = raw.audience.mode;
+    const location = cleanString(raw.audience.location);
+    if (location) audience.location = location;
+    const skillLevels = cleanStringArray(raw.audience.skillLevels);
+    if (skillLevels.length > 0) audience.skillLevels = skillLevels;
+    const primarySkillLevel = cleanString(raw.audience.primarySkillLevel);
+    if (primarySkillLevel) audience.primarySkillLevel = primarySkillLevel;
+    if (['explicit', 'inferred', 'default'].includes(raw.audience.skillLevelSource)) {
+      audience.skillLevelSource = raw.audience.skillLevelSource;
+    }
+    if (raw.audience.age && (cleanNumber(raw.audience.age.min) !== null || cleanNumber(raw.audience.age.max) !== null)) {
+      audience.age = {};
+      const ageMin = cleanNumber(raw.audience.age.min);
+      if (ageMin !== null) audience.age.min = ageMin;
+      const ageMax = cleanNumber(raw.audience.age.max);
+      if (ageMax !== null) audience.age.max = ageMax;
+    }
+    if (raw.audience.constraints && typeof raw.audience.constraints === 'object') {
+      const constraints = {};
+      const participantType = cleanStringArray(raw.audience.constraints.participantType);
+      if (participantType.length > 0) constraints.participantType = participantType;
+      const academicStatus = cleanString(raw.audience.constraints.academicStatus);
+      if (academicStatus) constraints.academicStatus = academicStatus;
+      const graduationAfter = cleanString(raw.audience.constraints.graduationAfter);
+      if (graduationAfter) constraints.graduationAfter = graduationAfter;
+      const organizationFoundedAfter = cleanString(raw.audience.constraints.organizationFoundedAfter);
+      if (organizationFoundedAfter) constraints.organizationFoundedAfter = organizationFoundedAfter;
+      if (raw.audience.constraints.teamSize && (cleanNumber(raw.audience.constraints.teamSize.min) !== null || cleanNumber(raw.audience.constraints.teamSize.max) !== null)) {
+        constraints.teamSize = {};
+        const tMin = cleanNumber(raw.audience.constraints.teamSize.min);
+        if (tMin !== null) constraints.teamSize.min = tMin;
+        const tMax = cleanNumber(raw.audience.constraints.teamSize.max);
+        if (tMax !== null) constraints.teamSize.max = tMax;
+      }
+      if (Object.keys(constraints).length > 0) audience.constraints = constraints;
+    }
+    doc.audience = audience;
+  }
+
+  // ── Timeline ────────────────────────────────────────────────
+  if (raw.timeline && typeof raw.timeline === 'object') {
+    const timeline = {};
+    const startUTC = toDate(raw.timeline.startUTC);
+    if (startUTC) timeline.startUTC = startUTC;
+    const startDateUTC = toDate(raw.timeline.startDateUTC);
+    if (startDateUTC) timeline.startDateUTC = startDateUTC;
+    const registrationDeadlineUTC = toDate(raw.timeline.registrationDeadlineUTC);
+    if (registrationDeadlineUTC) timeline.registrationDeadlineUTC = registrationDeadlineUTC;
+    const submissionDeadlineUTC = toDate(raw.timeline.submissionDeadlineUTC);
+    if (submissionDeadlineUTC) timeline.submissionDeadlineUTC = submissionDeadlineUTC;
+    const eventEndUTC = toDate(raw.timeline.eventEndUTC);
+    if (eventEndUTC) timeline.eventEndUTC = eventEndUTC;
+    const organizerTimeZone = cleanString(raw.timeline.organizerTimeZone);
+    if (organizerTimeZone) timeline.organizerTimeZone = organizerTimeZone;
+    doc.timeline = timeline;
+  }
+  if (!doc.timeline || !doc.timeline.submissionDeadlineUTC) {
+    throw new Error('Submission deadline is required');
+  }
+
+  // ── Source ──────────────────────────────────────────────────
+  if (raw.source && typeof raw.source === 'object') {
+    const source = {};
+    const sourceName = cleanString(raw.source.name);
+    if (sourceName) source.name = sourceName;
+    const sourceUrl = cleanString(raw.source.url);
+    if (sourceUrl) source.url = sourceUrl;
+    source.type = VALID_SOURCE_TYPES.includes(raw.source.type) ? raw.source.type : 'aggregator';
+    doc.source = source;
+  }
+
+  // ── Hackathon (sparse, only for type === 'hackathon') ───────
+  if (doc.type === 'hackathon' && raw.hackathon && typeof raw.hackathon === 'object') {
+    const h = raw.hackathon;
+    const hackathon = {};
+    const duration = cleanString(h.duration);
+    if (duration) hackathon.duration = duration;
+    const platform = cleanString(h.platform);
+    if (platform) hackathon.platform = platform;
+    const techStack = cleanStringArray(h.techStack);
+    if (techStack.length > 0) hackathon.techStack = techStack;
+    hackathon.mentorship = h.mentorship === true || h.mentorship === 'true';
+    const submissionRequirements = cleanStringArray(h.submissionRequirements);
+    if (submissionRequirements.length > 0) hackathon.submissionRequirements = submissionRequirements;
+    if (Array.isArray(h.tracks)) {
+      const tracks = h.tracks
+        .map(t => {
+          const name = cleanString(t.name);
+          if (!name) return null;
+          const track = { name };
+          const desc = cleanString(t.description);
+          if (desc) track.description = desc;
+          const prizeUSD = cleanNumber(t.prizeUSD);
+          if (prizeUSD !== null) track.prizeUSD = prizeUSD;
+          return track;
+        })
+        .filter(Boolean);
+      if (tracks.length > 0) hackathon.tracks = tracks;
+    }
+    if (Array.isArray(h.judgingCriteria)) {
+      const judgingCriteria = h.judgingCriteria
+        .map(j => {
+          const name = cleanString(j.name);
+          if (!name) return null;
+          const jc = { name };
+          const desc = cleanString(j.description);
+          if (desc) jc.description = desc;
+          const weight = cleanNumber(j.weight);
+          if (weight !== null) jc.weight = weight;
+          return jc;
+        })
+        .filter(Boolean);
+      if (judgingCriteria.length > 0) hackathon.judgingCriteria = judgingCriteria;
+    }
+    if (Array.isArray(h.prizeBreakdown)) {
+      const prizeBreakdown = h.prizeBreakdown
+        .map(p => {
+          const place = cleanString(p.place);
+          if (!place) return null;
+          const pb = { place };
+          const track = cleanString(p.track);
+          if (track) pb.track = track;
+          const amount = cleanString(p.amount);
+          if (amount) pb.amount = amount;
+          return pb;
+        })
+        .filter(Boolean);
+      if (prizeBreakdown.length > 0) hackathon.prizeBreakdown = prizeBreakdown;
+    }
+    if (h.engagement && typeof h.engagement === 'object') {
+      const engagement = {};
+      const totalParticipants = cleanNumber(h.engagement.totalParticipants);
+      if (totalParticipants !== null) engagement.totalParticipants = totalParticipants;
+      const projectsSubmitted = cleanNumber(h.engagement.projectsSubmitted);
+      if (projectsSubmitted !== null) engagement.projectsSubmitted = projectsSubmitted;
+      if (Object.keys(engagement).length > 0) hackathon.engagement = engagement;
+    }
+    if (h.teamSize && (cleanNumber(h.teamSize.min) !== null || cleanNumber(h.teamSize.max) !== null)) {
+      hackathon.teamSize = {};
+      const hMin = cleanNumber(h.teamSize.min);
+      if (hMin !== null) hackathon.teamSize.min = hMin;
+      const hMax = cleanNumber(h.teamSize.max);
+      if (hMax !== null) hackathon.teamSize.max = hMax;
+    }
+    doc.hackathon = hackathon;
+  }
+
+  // ── Status (computed from timeline unless explicitly provided) ──
+  doc.status = VALID_STATUS.includes(raw.status) ? raw.status : computeStatusFromDates(doc);
+
+  return doc;
+}
+
+function normalizeFilterKeys(rawFilterKeys, category) {
+  const fk = {};
+  const DOMAIN_MAP = {
+    'Creative Arts': 'creative-arts',
+    'Technology & AI': 'technology-ai',
+    'Science & Research': 'science-research',
+    'Business & Innovation': 'business-innovation',
+    'Writing & Media': 'writing-media',
+    'Environment & Sustainability': 'environment-sustainability',
+    'Food & Cooking': 'food-cooking',
+    'Education & Learning': 'education-learning',
+    'Social Impact & Leadership': 'social-impact-leadership',
+    'Open / Multidisciplinary': 'open-multidisciplinary',
+  };
+  if (category && DOMAIN_MAP[category]) fk.domain = DOMAIN_MAP[category];
+  if (rawFilterKeys && typeof rawFilterKeys === 'object') {
+    if (rawFilterKeys.domain) fk.domain = cleanString(rawFilterKeys.domain) || fk.domain;
+    const format = cleanStringArray(rawFilterKeys.format);
+    if (format.length > 0) fk.format = format;
+    const medium = cleanStringArray(rawFilterKeys.medium);
+    if (medium.length > 0) fk.medium = medium;
+    const themes = cleanStringArray(rawFilterKeys.themes);
+    if (themes.length > 0) fk.themes = themes;
+  }
+  return fk;
+}
+
+const contestSelectFields = {
+  title: 1,
+  slug: 1,
+  type: 1,
+  category: 1,
+  subCategory: 1,
+  description: 1,
+  link: 1,
+  tags: 1,
+  flags: 1,
+  status: 1,
+  verificationStatus: 1,
+  trendingUntil: 1,
+  archivedAt: 1,
+  createdAt: 1,
+  updatedAt: 1,
+  image: 1,
+  prize: 1,
+  entry: 1,
+  timeline: 1,
+  audience: 1,
+  source: 1,
+};
+
+/**
+ * GET /api/admin/contests
+ * Admin list of all contests (including archived), with search + filters.
+ */
+exports.listContests = async (req, res) => {
+  try {
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 25));
+    const search = (req.query.search || '').trim();
+    const type = req.query.type || 'all';
+    const status = req.query.status || 'all';
+    const category = req.query.category || 'all';
+    const showArchived = req.query.archived === 'true';
+
+    const query = {};
+    if (!showArchived) query.archivedAt = null;
+    if (type && type !== 'all') query.type = type;
+    if (status && status !== 'all') query.status = status;
+    if (category && category !== 'all') query.category = category;
+    if (search) {
+      query.$or = [
+        { title: { $regex: search, $options: 'i' } },
+        { category: { $regex: search, $options: 'i' } },
+        { slug: { $regex: search, $options: 'i' } },
+        { tags: { $regex: search, $options: 'i' } },
+      ];
+    }
+
+    const [contests, total] = await Promise.all([
+      Contest.find(query)
+        .select(contestSelectFields)
+        .sort({ 'timeline.submissionDeadlineUTC': -1, createdAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .lean(),
+      Contest.countDocuments(query),
+    ]);
+
+    res.json({
+      success: true,
+      contests,
+      pagination: { page, limit, total, pages: Math.ceil(total / limit) },
+    });
+  } catch (error) {
+    console.error('List contests error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * GET /api/admin/contests/:id
+ * Full contest document for the edit form.
+ */
+exports.getContest = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!mongoose.isValidObjectId(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid contest id' });
+    }
+    const contest = await Contest.findById(id).lean();
+    if (!contest) {
+      return res.status(404).json({ success: false, message: 'Contest not found' });
+    }
+    res.json({ success: true, contest });
+  } catch (error) {
+    console.error('Get contest error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * POST /api/admin/contests
+ * Create a contest with the exact canonical pipeline structure.
+ */
+exports.createContest = async (req, res) => {
+  try {
+    const payload = normalizeContestPayload(req.body);
+    const id = new mongoose.Types.ObjectId();
+    payload._id = id;
+    payload.slug = generateSlug(payload.title, id);
+    payload.status = VALID_STATUS.includes(payload.status) ? payload.status : computeStatusFromDates(payload);
+    if (shouldAutoFeature(payload) && !payload.flags.includes('featured')) {
+      payload.flags.push('featured');
+    }
+
+    const contest = await Contest.create(payload);
+
+    try {
+      await logAction({
+        adminId: req.admin.id,
+        adminName: req.admin.username || req.admin.id,
+        action: 'create_contest',
+        description: `Created contest: "${contest.title}"`,
+        targetId: contest._id,
+        targetType: 'contest',
+        metadata: { title: contest.title, type: contest.type, category: contest.category },
+      });
+    } catch (logErr) {
+      console.warn('Failed to log create contest activity:', logErr.message);
+    }
+
+    res.status(201).json({ success: true, message: 'Contest created successfully', contest });
+  } catch (error) {
+    console.error('Create contest error:', error);
+    res.status(400).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * PUT /api/admin/contests/:id
+ * Update a contest, preserving operational fields not sent by the form.
+ */
+exports.updateContest = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!mongoose.isValidObjectId(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid contest id' });
+    }
+
+    const existing = await Contest.findById(id);
+    if (!existing) {
+      return res.status(404).json({ success: false, message: 'Contest not found' });
+    }
+
+    const payload = normalizeContestPayload(req.body);
+    // Preserve operational image fields not sent by the form (R2 backup object,
+    // primary source/status/variants/fileSize/sha256/lastCheckedAt). Without this
+    // the $set below would silently wipe image.backup and mislabel R2 sources on
+    // every edit. Only the primary URL (and alt/tag when non-empty) are overridden.
+    if (payload.image && existing.image && typeof existing.image === 'object') {
+      const existingPrimary = (existing.image.primary && typeof existing.image.primary === 'object') ? existing.image.primary : {};
+      payload.image = {
+        ...existing.image,
+        alt: payload.image.alt ?? existing.image.alt,
+        tag: payload.image.tag ?? existing.image.tag,
+        primary: {
+          ...existingPrimary,
+          url: payload.image.primary?.url ?? null,
+        },
+      };
+    }
+    payload.slug = generateSlug(payload.title, existing._id);
+    if (shouldAutoFeature(payload) && !payload.flags.includes('featured')) {
+      payload.flags.push('featured');
+    }
+
+    // When a doc switches away from type 'hackathon', drop the stale hackathon
+    // subdocument — normalizeContestPayload only writes it for hackathon type,
+    // so the $set alone would leave orphaned tracks/judgingCriteria behind.
+    const setOp = { $set: payload };
+    if (existing.type === 'hackathon' && payload.type !== 'hackathon' && existing.hackathon) {
+      setOp.$unset = { hackathon: 1 };
+    }
+
+    const contest = await Contest.findByIdAndUpdate(id, setOp, { new: true, runValidators: false }).lean();
+
+    try {
+      await logAction({
+        adminId: req.admin.id,
+        adminName: req.admin.username || req.admin.id,
+        action: 'update_contest',
+        description: `Updated contest: "${contest.title}"`,
+        targetId: id,
+        targetType: 'contest',
+        metadata: { title: contest.title, type: contest.type, category: contest.category },
+      });
+    } catch (logErr) {
+      console.warn('Failed to log update contest activity:', logErr.message);
+    }
+
+    res.json({ success: true, message: 'Contest updated successfully', contest });
+  } catch (error) {
+    console.error('Update contest error:', error);
+    res.status(400).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * DELETE /api/admin/contests/:id
+ * Soft-delete a contest (sets archivedAt) — matches how the system archives.
+ */
+exports.archiveContest = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!mongoose.isValidObjectId(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid contest id' });
+    }
+    const result = await Contest.updateOne({ _id: id }, { $set: { archivedAt: new Date() } });
+    if (result.matchedCount === 0) {
+      return res.status(404).json({ success: false, message: 'Contest not found' });
+    }
+
+    try {
+      await logAction({
+        adminId: req.admin.id,
+        adminName: req.admin.username || req.admin.id,
+        action: 'archive_contest',
+        description: `Archived contest: ${id}`,
+        targetId: id,
+        targetType: 'contest',
+      });
+    } catch (logErr) {
+      console.warn('Failed to log archive activity:', logErr.message);
+    }
+
+    res.json({ success: true, message: 'Contest archived' });
+  } catch (error) {
+    console.error('Archive contest error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * POST /api/admin/contests/:id/restore
+ * Bring an archived contest back.
+ */
+exports.restoreContest = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!mongoose.isValidObjectId(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid contest id' });
+    }
+    const result = await Contest.updateOne({ _id: id }, { $set: { archivedAt: null } });
+    if (result.matchedCount === 0) {
+      return res.status(404).json({ success: false, message: 'Contest not found' });
+    }
+
+    try {
+      await logAction({
+        adminId: req.admin.id,
+        adminName: req.admin.username || req.admin.id,
+        action: 'restore_contest',
+        description: `Restored contest: ${id}`,
+        targetId: id,
+        targetType: 'contest',
+      });
+    } catch (logErr) {
+      console.warn('Failed to log restore activity:', logErr.message);
+    }
+
+    res.json({ success: true, message: 'Contest restored' });
+  } catch (error) {
+    console.error('Restore contest error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  CONTEST DETAILS (DETAILED GUIDE) — admin CRUD
+//
+//  Reads/writes the shared `contest_details` collection that the public
+//  contest detail page renders as its "DETAILED GUIDE" (AI-POWERED INSIGHTS)
+//  section. Every field below mirrors Phase2 `models/ContestDetail.js`.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * GET /api/admin/contests/:id/details
+ * Full contest_details doc for the admin details editor (null if none yet).
+ */
+exports.getContestDetails = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!mongoose.isValidObjectId(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid contest id' });
+    }
+    const contest = await Contest.findById(id).select('title slug type category').lean();
+    if (!contest) {
+      return res.status(404).json({ success: false, message: 'Contest not found' });
+    }
+    const details = await ContestDetail.findOne({ contestId: id }).lean();
+    res.json({ success: true, contest, details });
+  } catch (error) {
+    console.error('Get contest details error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const cleanStr = (v) => {
+  if (v === undefined || v === null) return null;
+  const s = String(v).trim();
+  return s === '' ? null : s;
+};
+
+const cleanStrList = (v) => {
+  if (!Array.isArray(v)) return [];
+  return [...new Set(v.map((x) => String(x).trim()).filter(Boolean))];
+};
+
+const cleanNum = (v) => {
+  if (v === undefined || v === null || v === '') return null;
+  const n = Number(v);
+  return Number.isNaN(n) ? null : n;
+};
+
+/**
+ * PUT /api/admin/contests/:id/details
+ * Create or update the DETAILED GUIDE content for a contest.
+ * Upserts into the shared contest_details collection.
+ */
+exports.saveContestDetails = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!mongoose.isValidObjectId(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid contest id' });
+    }
+    const contest = await Contest.findById(id).select('title type').lean();
+    if (!contest) {
+      return res.status(404).json({ success: false, message: 'Contest not found' });
+    }
+
+    const raw = req.body || {};
+    const rawContent = raw.content && typeof raw.content === 'object' ? raw.content : {};
+    const rawResearch = raw.research && typeof raw.research === 'object' ? raw.research : {};
+    const rawSeo = raw.seo && typeof raw.seo === 'object' ? raw.seo : {};
+    const rawMetadata = raw.metadata && typeof raw.metadata === 'object' ? raw.metadata : {};
+
+    const content = {};
+    if (rawContent.hero && typeof rawContent.hero === 'object') {
+      const hero = {};
+      const subheadline = cleanStr(rawContent.hero.subheadline);
+      if (subheadline) hero.subheadline = subheadline;
+      const valueProposition = cleanStr(rawContent.hero.valueProposition);
+      if (valueProposition) hero.valueProposition = valueProposition;
+      if (Object.keys(hero).length > 0) content.hero = hero;
+    }
+    const whyJoin = cleanStr(rawContent.whyJoin);
+    if (whyJoin) content.whyJoin = whyJoin;
+    const whoShouldApply = cleanStr(rawContent.whoShouldApply);
+    if (whoShouldApply) content.whoShouldApply = whoShouldApply;
+    const benefits = cleanStrList(rawContent.benefits);
+    if (benefits.length > 0) content.benefits = benefits;
+    const tips = cleanStrList(rawContent.tips);
+    if (tips.length > 0) content.tips = tips;
+    const readingTime = cleanNum(rawContent.readingTime);
+    if (readingTime !== null) content.readingTime = readingTime;
+    const judgingProcess = cleanStr(rawContent.judgingProcess);
+    if (judgingProcess) content.judgingProcess = judgingProcess;
+    const mentorshipDetails = cleanStr(rawContent.mentorshipDetails);
+    if (mentorshipDetails) content.mentorshipDetails = mentorshipDetails;
+
+    if (Array.isArray(rawContent.submissionGuide)) {
+      const guide = rawContent.submissionGuide
+        .map((g) => {
+          const step = cleanStr(g && g.step);
+          if (!step) return null;
+          const item = { step };
+          const detail = cleanStr(g && g.detail);
+          if (detail) item.detail = detail;
+          return item;
+        })
+        .filter(Boolean);
+      if (guide.length > 0) content.submissionGuide = guide;
+    }
+    if (Array.isArray(rawContent.timelineSummary)) {
+      const summary = rawContent.timelineSummary
+        .map((t) => {
+          const phase = cleanStr(t && t.phase);
+          const label = cleanStr(t && t.label);
+          if (!phase && !label) return null;
+          const item = {};
+          if (phase) item.phase = phase;
+          if (label) item.label = label;
+          const date = cleanStr(t && t.date);
+          if (date) item.date = date;
+          return item;
+        })
+        .filter(Boolean);
+      if (summary.length > 0) content.timelineSummary = summary;
+    }
+    if (Array.isArray(rawContent.faq)) {
+      const faq = rawContent.faq
+        .map((f) => {
+          const question = cleanStr(f && f.question);
+          if (!question) return null;
+          const item = { question };
+          const answer = cleanStr(f && f.answer);
+          if (answer) item.answer = answer;
+          return item;
+        })
+        .filter(Boolean);
+      if (faq.length > 0) content.faq = faq;
+    }
+    if (rawContent.shouldYouApply && typeof rawContent.shouldYouApply === 'object') {
+      const sya = rawContent.shouldYouApply;
+      const shouldYouApply = {};
+      const idealFor = cleanStr(sya.idealFor);
+      if (idealFor) shouldYouApply.idealFor = idealFor;
+      const goodFit = cleanStrList(sya.goodFit);
+      if (goodFit.length > 0) shouldYouApply.goodFit = goodFit;
+      const notIdealFor = cleanStrList(sya.notIdealFor);
+      if (notIdealFor.length > 0) shouldYouApply.notIdealFor = notIdealFor;
+      if (Object.keys(shouldYouApply).length > 0) content.shouldYouApply = shouldYouApply;
+    }
+    if (Array.isArray(rawContent.resourceOfferings)) {
+      const offerings = rawContent.resourceOfferings
+        .map((o) => {
+          const type = cleanStr(o && o.type);
+          if (!type) return null;
+          const item = { type };
+          const provider = cleanStr(o && o.provider);
+          if (provider) item.provider = provider;
+          const value = cleanStr(o && o.value);
+          if (value) item.value = value;
+          const description = cleanStr(o && o.description);
+          if (description) item.description = description;
+          return item;
+        })
+        .filter(Boolean);
+      if (offerings.length > 0) content.resourceOfferings = offerings;
+    }
+
+    let research = {};
+    if (rawResearch.officialWebsite && typeof rawResearch.officialWebsite === 'object') {
+      const url = cleanStr(rawResearch.officialWebsite.url);
+      if (url) research.officialWebsite = { url };
+    }
+    const pastWinners = cleanStrList(rawResearch.pastWinners);
+    if (pastWinners.length > 0) research.pastWinners = pastWinners;
+    const communityTips = cleanStrList(rawResearch.communityTips);
+    if (communityTips.length > 0) research.communityTips = communityTips;
+
+    const seo = {};
+    const metaTitle = cleanStr(rawSeo.metaTitle);
+    if (metaTitle) seo.metaTitle = metaTitle;
+    const metaDescription = cleanStr(rawSeo.metaDescription);
+    if (metaDescription) seo.metaDescription = metaDescription;
+    const keywords = cleanStrList(rawSeo.keywords);
+    if (keywords.length > 0) seo.keywords = keywords;
+
+    let metadata = {};
+    const qualityScore = cleanNum(rawMetadata.qualityScore);
+    if (qualityScore !== null) metadata.qualityScore = qualityScore;
+    const pipelineSteps = cleanStrList(rawMetadata.pipelineSteps);
+    if (pipelineSteps.length > 0) metadata.pipelineSteps = pipelineSteps;
+    const errors = cleanStrList(rawMetadata.errors);
+    if (errors.length > 0) metadata.errors = errors;
+
+    const existing = await ContestDetail.findOne({ contestId: id }).lean();
+    const isNew = !existing;
+
+    // The admin form only manages content + a few research/seo fields. Preserve
+    // pipeline-owned audit data (metadata.qualityScore/pipelineSteps/errors and
+    // research.faqSources/redditThreads/officialWebsite.lastFetched) instead of
+    // wiping them with a wholesale $set on a shared pipeline collection.
+    if (existing) {
+      if (Object.keys(metadata).length === 0 && existing.metadata) {
+        metadata = existing.metadata;
+      }
+      const existingResearch = (existing.research && typeof existing.research === 'object') ? existing.research : {};
+      research = {
+        ...existingResearch,
+        ...research,
+        officialWebsite: {
+          ...(existingResearch.officialWebsite && typeof existingResearch.officialWebsite === 'object' ? existingResearch.officialWebsite : {}),
+          ...(research.officialWebsite || {}),
+        },
+      };
+    }
+
+    const setFields = {
+      status: 'completed',
+      generatedBy: 'admin',
+      generatedAt: new Date(),
+      content,
+      research,
+      seo,
+      metadata,
+    };
+    if (isNew) {
+      setFields.contestId = id;
+      setFields.version = 1;
+      setFields.schemaVersion = 1;
+    } else {
+      setFields.version = (existing.version ?? 1) + 1;
+      setFields.previousVersionAt = existing.generatedAt || new Date();
+      setFields.changeLog = cleanStr(raw.changeLog) || 'Updated via admin dashboard';
+    }
+
+    const details = await ContestDetail.findOneAndUpdate(
+      { contestId: id },
+      { $set: setFields, $setOnInsert: { contestId: id } },
+      { upsert: true, new: true }
+    ).lean();
+
+    try {
+      await logAction({
+        adminId: req.admin.id,
+        adminName: req.admin.username || req.admin.id,
+        action: isNew ? 'create_contest_details' : 'update_contest_details',
+        description: `${isNew ? 'Created' : 'Updated'} DETAILED GUIDE for contest: "${contest.title}"`,
+        targetId: id,
+        targetType: 'contest',
+        metadata: { title: contest.title, version: details.version },
+      });
+    } catch (logErr) {
+      console.warn('Failed to log contest details activity:', logErr.message);
+    }
+
+    res.json({ success: true, message: isNew ? 'Detailed guide created' : 'Detailed guide updated', details });
+  } catch (error) {
+    console.error('Save contest details error:', error);
+    res.status(400).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * DELETE /api/admin/contests/:id/details
+ * Remove the DETAILED GUIDE doc (back to 'No details available yet').
+ */
+exports.deleteContestDetails = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!mongoose.isValidObjectId(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid contest id' });
+    }
+    const result = await ContestDetail.deleteOne({ contestId: id });
+    if (result.deletedCount === 0) {
+      return res.status(404).json({ success: false, message: 'No detailed guide found for this contest' });
+    }
+
+    try {
+      await logAction({
+        adminId: req.admin.id,
+        adminName: req.admin.username || req.admin.id,
+        action: 'delete_contest_details',
+        description: `Deleted DETAILED GUIDE for contest: ${id}`,
+        targetId: id,
+        targetType: 'contest',
+      });
+    } catch (logErr) {
+      console.warn('Failed to log delete details activity:', logErr.message);
+    }
+
+    res.json({ success: true, message: 'Detailed guide deleted' });
+  } catch (error) {
+    console.error('Delete contest details error:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
