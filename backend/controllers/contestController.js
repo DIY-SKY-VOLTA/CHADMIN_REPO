@@ -157,6 +157,18 @@ exports.getImagesHealth = async (req, res) => {
     }
 
     const totalFiltered = filteredIds.length;
+
+    // idsOnly mode: return the full list of matching IDs (across all pages) so
+    // the admin UI can offer "select all matching contests" in one click.
+    if (req.query.idsOnly === 'true') {
+      return res.json({
+        success: true,
+        ids: filteredIds,
+        count: totalFiltered,
+        stats,
+      });
+    }
+
     const pages = Math.max(1, Math.ceil(totalFiltered / limit));
 
     // 2. Fetch only the requested page from the filtered results
@@ -297,11 +309,92 @@ exports.bulkRecheck = async (req, res) => {
   }
 };
 
+// ─── SSRF guard for URL-based image fetch ───────────────────────────────────
+
+const net = require('net');
+const dns = require('dns').promises;
+
+function isPrivateIpv4(ip) {
+  const [a, b] = ip.split('.').map(Number);
+  if (a === 0) return true;                            // 0.0.0.0/8
+  if (a === 10) return true;                           // 10.0.0.0/8
+  if (a === 127) return true;                          // 127.0.0.0/8 loopback
+  if (a === 169 && b === 254) return true;             // 169.254.0.0/16 link-local (incl. AWS metadata)
+  if (a === 172 && b >= 16 && b <= 31) return true;    // 172.16.0.0/12
+  if (a === 192 && b === 168) return true;             // 192.168.0.0/16
+  if (a === 100 && b >= 64 && b <= 127) return true;   // 100.64.0.0/10 CGNAT
+  if (a >= 224) return true;                           // multicast + reserved
+  return false;
+}
+
+function isPrivateIpv6(ip) {
+  const lower = ip.toLowerCase();
+  if (lower === '::' || lower === '::1') return true;
+  if (lower.startsWith('fc') || lower.startsWith('fd')) return true;      // fc00::/7 ULA
+  if (/^fe[89ab]/.test(lower)) return true;                               // fe80::/10 link-local
+  if (lower.startsWith('ff')) return true;                                // multicast
+  if (lower.startsWith('2001:db8')) return true;                          // documentation range
+  if (lower.startsWith('::ffff:')) return isPrivateIpv4(lower.split(':').pop()); // v4-mapped
+  return false;
+}
+
+function isPrivateHost(hostname) {
+  const ipv = net.isIP(hostname);
+  if (ipv === 4) return isPrivateIpv4(hostname);
+  if (ipv === 6) return isPrivateIpv6(hostname);
+  if (hostname === 'localhost' || hostname.endsWith('.local')) return true;
+  return false;
+}
+
+/**
+ * Reject URLs pointing at private/loopback/link-local hosts so the admin
+ * URL-fetch endpoint can't be abused as an SSRF proxy to internal services.
+ * Resolves hostnames (and fails closed when resolution fails).
+ */
+async function isPublicImageHost(hostname) {
+  if (!hostname || isPrivateHost(hostname)) return false;
+  try {
+    const addrs = await dns.lookup(hostname, { all: true });
+    if (addrs.length === 0) return false;
+    return addrs.every((a) => !isPrivateHost(a.address));
+  } catch {
+    return false; // fail closed — unresolvable host is not a public image host
+  }
+}
+
+/** Validate a full http(s) URL string points at a public host. */
+async function isPublicUrl(urlString) {
+  try {
+    const parsed = new URL(urlString);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
+    return await isPublicImageHost(parsed.hostname);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Re-validate the FINAL response URL after redirects so a public URL can't
+ * silently redirect to an internal host.
+ */
+async function isPublicResponseUrl(response) {
+  try {
+    return await isPublicImageHost(new URL(response.url).hostname);
+  } catch {
+    return false;
+  }
+}
+
+const FETCH_IMAGE_TIMEOUT_MS = 15000;
+
 // ─── Upload ─────────────────────────────────────────────────────────────────
 
 /**
- * POST /api/admin/contests/images/upload
- * Upload a replacement image for a contest.
+ * Upload a replacement image for a contest to R2.
+ *
+ * Converts to WebP (best-effort AVIF), uploads to Cloudflare R2, and writes
+ * the canonical image shape back to MongoDB.
+ */
 async function processAndUploadImageToR2(rawBuffer, contestId) {
   const client = getR2Client();
   if (!client) {
@@ -461,6 +554,123 @@ exports.uploadContestImage = async (req, res) => {
 };
 
 /**
+ * POST /api/admin/contests/images/upload-url
+ * Set a contest's image from a working external URL: fetch it, validate it's
+ * an image, then push it through the same R2 pipeline (WebP + best-effort
+ * AVIF, primary + backup) used by file uploads.
+ */
+exports.uploadContestImageFromUrl = async (req, res) => {
+  try {
+    const { contestId, imageUrl } = req.body;
+
+    if (!contestId) {
+      return res.status(400).json({ success: false, message: 'contestId is required' });
+    }
+    if (!imageUrl) {
+      return res.status(400).json({ success: false, message: 'Image URL is required' });
+    }
+
+    let parsed;
+    try {
+      parsed = new URL(imageUrl);
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw new Error('unsupported protocol');
+    } catch {
+      return res.status(400).json({ success: false, message: 'Invalid image URL. Must be a valid http(s) URL.' });
+    }
+
+    if (!(await isPublicUrl(imageUrl))) {
+      return res.status(400).json({ success: false, message: 'Image URL must point to a public host' });
+    }
+
+    const contest = await Contest.findById(contestId).lean();
+    if (!contest) {
+      return res.status(404).json({ success: false, message: 'Contest not found' });
+    }
+
+    // Fetch the remote image with a 15s timeout and a 15MB cap
+    let response;
+    try {
+      response = await fetch(imageUrl, {
+        redirect: 'follow',
+        signal: AbortSignal.timeout(FETCH_IMAGE_TIMEOUT_MS),
+        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; ChadminBot/1.0)' },
+      });
+    } catch (err) {
+      const reason = err.name === 'TimeoutError' ? 'request timed out after 15s' : err.message;
+      return res.status(400).json({ success: false, message: `Failed to fetch image from URL: ${reason}` });
+    }
+
+    if (!response.ok) {
+      return res.status(400).json({ success: false, message: `Failed to fetch image from URL: HTTP ${response.status} ${response.statusText}` });
+    }
+
+    // Re-validate the FINAL URL after redirects
+    if (!(await isPublicResponseUrl(response))) {
+      return res.status(400).json({ success: false, message: 'Redirected image URL points to a non-public host' });
+    }
+
+    const contentType = response.headers.get('content-type') || '';
+    if (contentType && !contentType.startsWith('image/')) {
+      return res.status(400).json({ success: false, message: 'URL does not point to an image file' });
+    }
+
+    const contentLength = parseInt(response.headers.get('content-length') || '0', 10);
+    if (contentLength > 15 * 1024 * 1024) {
+      return res.status(400).json({ success: false, message: 'Image exceeds 15MB limit' });
+    }
+
+    const arrayBuffer = await response.arrayBuffer();
+    const rawBuffer = Buffer.from(arrayBuffer);
+    if (rawBuffer.length === 0) {
+      return res.status(400).json({ success: false, message: 'Empty image data from URL' });
+    }
+    if (rawBuffer.length > 15 * 1024 * 1024) {
+      return res.status(400).json({ success: false, message: 'Image exceeds 15MB limit' });
+    }
+
+    // Confirm the bytes are actually a decodable image before the R2 pipeline
+    try {
+      await sharp(rawBuffer).metadata();
+    } catch {
+      return res.status(400).json({ success: false, message: 'URL does not point to a valid image file' });
+    }
+
+    const { r2Url, webpBuffer, metadata, sha256, updateFields } = await processAndUploadImageToR2(rawBuffer, contestId);
+
+    try {
+      await logAction({
+        adminId: req.admin.id,
+        adminName: req.admin.username || req.admin.id,
+        action: 'upload_contest_image_url',
+        description: `Fetched image from URL and backed up for contest: "${contest.title || contestId}"`,
+        targetId: contestId,
+        targetType: 'contest',
+        metadata: { title: contest.title, sha256, format: 'webp', sizeBytes: webpBuffer.length, sourceUrl: imageUrl },
+      });
+    } catch (logErr) {
+      console.warn('Failed to log URL upload activity:', logErr.message);
+    }
+
+    res.json({
+      success: true,
+      message: 'Image fetched from URL, uploaded and backed up to R2',
+      contestId,
+      image: {
+        url: r2Url,
+        format: 'webp',
+        sizeBytes: webpBuffer.length,
+        width: metadata.width,
+        height: metadata.height,
+        variants: updateFields['image.primary.variants'] || null,
+      },
+    });
+  } catch (error) {
+    console.error('Contest image URL upload error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/**
  * POST /api/admin/contests/images/backup
  * Backup a primary image that doesn't have a backup to R2.
  */
@@ -485,8 +695,24 @@ exports.backupImage = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Contest already has a backup' });
     }
 
-    // Fetch the image
-    const response = await fetch(primaryUrl);
+    // SSRF guard: refuse to fetch private/loopback/link-local hosts
+    if (!(await isPublicUrl(primaryUrl))) {
+      return res.status(400).json({ success: false, message: 'Primary image URL points to a non-public host; backup blocked' });
+    }
+
+    // Fetch the image (15s timeout)
+    let response;
+    try {
+      response = await fetch(primaryUrl, {
+        redirect: 'follow',
+        signal: AbortSignal.timeout(FETCH_IMAGE_TIMEOUT_MS),
+        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; ChadminBot/1.0)' },
+      });
+    } catch (err) {
+      const reason = err.name === 'TimeoutError' ? 'request timed out after 15s' : err.message;
+      return res.status(400).json({ success: false, message: `Failed to fetch image from URL: ${reason}` });
+    }
+
     if (!response.ok) {
       await Contest.updateOne(
         { _id: contestId },
@@ -498,6 +724,11 @@ exports.backupImage = async (req, res) => {
         }
       );
       return res.status(400).json({ success: false, message: `Failed to fetch image from URL: ${response.statusText}` });
+    }
+
+    // Re-validate the FINAL URL after redirects
+    if (!(await isPublicResponseUrl(response))) {
+      return res.status(400).json({ success: false, message: 'Redirected image URL points to a non-public host' });
     }
 
     const arrayBuffer = await response.arrayBuffer();
@@ -564,7 +795,22 @@ exports.bulkBackup = async (req, res) => {
       }
 
       try {
-        const response = await fetch(primaryUrl);
+        // SSRF guard: skip private/loopback/link-local hosts
+        if (!(await isPublicUrl(primaryUrl))) {
+          throw new Error('Non-public image host');
+        }
+
+        let response;
+        try {
+          response = await fetch(primaryUrl, {
+            redirect: 'follow',
+            signal: AbortSignal.timeout(FETCH_IMAGE_TIMEOUT_MS),
+            headers: { 'User-Agent': 'Mozilla/5.0 (compatible; ChadminBot/1.0)' },
+          });
+        } catch (err) {
+          throw new Error(err.name === 'TimeoutError' ? 'Request timed out' : err.message);
+        }
+
         if (!response.ok) {
            await Contest.updateOne(
              { _id: contest._id },
@@ -572,7 +818,12 @@ exports.bulkBackup = async (req, res) => {
            );
            throw new Error(`HTTP ${response.status} ${response.statusText}`);
         }
-        
+
+        // Re-validate the FINAL URL after redirects
+        if (!(await isPublicResponseUrl(response))) {
+          throw new Error('Redirected to a non-public host');
+        }
+
         const arrayBuffer = await response.arrayBuffer();
         const rawBuffer = Buffer.from(arrayBuffer);
         
@@ -659,7 +910,7 @@ exports.getContestDetails = async (req, res) => {
 //  CONTEST CRUD — Admin Create / Read / Update / Archive
 //
 //  Writes the SAME canonical document shape the automation pipeline uses
-//  (Phase2 backend `models/Contests.js` v3.0 + `Prompts.txt` v4.1 output).
+//  (Phase2 backend `models/Contests.js` v3.0 + `contest-structuring-v4.1.txt` output).
 //  The admin `Contests` model is `strict: false`, so every normalizer below
 //  mirrors the Phase2 model's pre('save') hooks to keep parity exactly:
 //    • slug generation            (kebab-title-XXXXX from ObjectId)
@@ -836,7 +1087,7 @@ function cleanStrings(value) {
 
 /**
  * Merge a raw form payload into a clean, canonical contest document.
- * Mirrors Phase2 model pre('save') hooks + Prompts.txt v4.1 schema.
+ * Mirrors Phase2 model pre('save') hooks + contest-structuring-v4.1.txt schema.
  */
 function normalizeContestPayload(raw) {
   const doc = {};

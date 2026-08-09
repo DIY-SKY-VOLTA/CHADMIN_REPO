@@ -15,66 +15,101 @@ import {
   Layers,
   FileCode,
   Calendar,
+  ShieldCheck,
+  ClipboardCheck,
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 
 // Vite `?raw` imports — always bundle the exact prompt text from disk
-import promptsTxt from '@/prompts/Prompts.txt?raw';
-import promptsHackathonsTxt from '@/prompts/Prompts-hackathons.txt?raw';
-import promptsEventsTxt from '@/prompts/Prompts-events.txt?raw';
-import promptsBackfillTxt from '@/prompts/Prompts-backfill.txt?raw';
-import hackathonPromptTxt from '@/prompts/HackathonPrompt.txt?raw';
+import contestStructuringTxt from '@/prompts/contest-structuring-v4.1.txt?raw';
+import contestBackfillTxt from '@/prompts/contest-backfill-v3.2.txt?raw';
+import contestDetailsTxt from '@/prompts/contest-details-v1.0.txt?raw';
+import hackathonStructuringTxt from '@/prompts/hackathon-structuring-v1.1.txt?raw';
+import hackathonDetailsTxt from '@/prompts/hackathon-details-v3.0.txt?raw';
+import eventStructuringTxt from '@/prompts/event-structuring-v1.1.txt?raw';
+import eventDetailsTxt from '@/prompts/event-details-v1.0.txt?raw';
+import validationTxt from '@/prompts/validation-v1.0.txt?raw';
 
 const PROMPTS = [
   {
-    id: 'contests',
-    title: 'Contest Extraction',
+    id: 'contest-structuring',
+    title: 'Contest Structuring',
     version: 'v4.1',
     icon: FileText,
     accent: 'text-blue-600 dark:text-blue-400 bg-blue-500/10 border-blue-500/15',
     description:
       'Main pipeline prompt — raw scraped contest data + URL context → one normalized contest document for the Contests collection.',
-    text: promptsTxt,
+    text: contestStructuringTxt,
   },
   {
-    id: 'hackathons',
-    title: 'Hackathon Extraction',
-    version: 'v1.1',
-    icon: Cpu,
-    accent: 'text-purple-600 dark:text-purple-400 bg-purple-500/10 border-purple-500/15',
-    description:
-      'Structured hackathon data (tracks, judging, resources) from raw webpage content using AI web search + URL grounding. Outputs to Contests (type: hackathon) + contest_details.',
-    text: promptsHackathonsTxt,
-  },
-  {
-    id: 'events',
-    title: 'Event Extraction',
-    version: 'v1.1',
-    icon: Calendar,
-    accent: 'text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border-emerald-500/15',
-    description:
-      'Strict event/conference extraction — speakers, agenda, ticket tiers & venue from subpages. One normalized event document per the Events schema.',
-    text: promptsEventsTxt,
-  },
-  {
-    id: 'backfill',
+    id: 'contest-backfill',
     title: 'Contest Backfill',
     version: 'v3.2',
     icon: RefreshCw,
     accent: 'text-amber-600 dark:text-amber-400 bg-amber-500/10 border-amber-500/15',
     description:
       'Computed-field backfill for existing contests: description, prizeSummary, feeConfidence, eligibilityLabel, primarySkillLevel. Outputs a JSON diff/patch, not a full doc.',
-    text: promptsBackfillTxt,
+    text: contestBackfillTxt,
+  },
+  {
+    id: 'contest-details',
+    title: 'Contest Details',
+    version: 'v1.0',
+    icon: Sparkles,
+    accent: 'text-violet-600 dark:text-violet-400 bg-violet-500/10 border-violet-500/15',
+    description:
+      'Detail-page writer — hero, why join, benefits, tips, FAQ, submission guide, timeline & SEO meta. Grounded in the contest doc + web research, pinned to the exact edition.',
+    text: contestDetailsTxt,
+  },
+  {
+    id: 'hackathon-structuring',
+    title: 'Hackathon Structuring',
+    version: 'v1.1',
+    icon: Cpu,
+    accent: 'text-purple-600 dark:text-purple-400 bg-purple-500/10 border-purple-500/15',
+    description:
+      'Structured hackathon data (tracks, judging, resources) from raw webpage content using AI web search + URL grounding. Outputs to Contests (type: hackathon) + contest_details.',
+    text: hackathonStructuringTxt,
   },
   {
     id: 'hackathon-details',
     title: 'Hackathon Details',
     version: 'v3.0',
-    icon: Sparkles,
+    icon: ClipboardCheck,
     accent: 'text-pink-600 dark:text-pink-400 bg-pink-500/10 border-pink-500/15',
     description:
-      'Hackathon data normalization engine — extract, normalize and return ONE hackathon document strictly following the schema (docs/HackathonPrompt.txt).',
-    text: hackathonPromptTxt,
+      'Hackathon data normalization engine — extract, normalize and return ONE hackathon document strictly following the schema.',
+    text: hackathonDetailsTxt,
+  },
+  {
+    id: 'event-structuring',
+    title: 'Event Structuring',
+    version: 'v1.1',
+    icon: Calendar,
+    accent: 'text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border-emerald-500/15',
+    description:
+      'Strict event/conference extraction — speakers, agenda, ticket tiers & venue from subpages. One normalized event document per the Events schema.',
+    text: eventStructuringTxt,
+  },
+  {
+    id: 'event-details',
+    title: 'Event Details',
+    version: 'v1.0',
+    icon: FileCode,
+    accent: 'text-teal-600 dark:text-teal-400 bg-teal-500/10 border-teal-500/15',
+    description:
+      'Event Intelligence writer — hero, why attend, speakers & agenda highlights, FAQ, tips and SEO meta for event detail pages. Pinned to the exact edition.',
+    text: eventDetailsTxt,
+  },
+  {
+    id: 'validation',
+    title: 'Data Validation',
+    version: 'v1.0',
+    icon: ShieldCheck,
+    accent: 'text-rose-600 dark:text-rose-400 bg-rose-500/10 border-rose-500/15',
+    description:
+      'Pre-pipeline QA — validates scraped contest records against live source pages via web search and flags discrepancies before normalization.',
+    text: validationTxt,
   },
 ].map((p) => ({
   ...p,
@@ -155,7 +190,7 @@ const Prompts = () => {
           { label: 'Total Prompts', value: PROMPTS.length, icon: Layers, color: 'text-neutral-500', bg: 'bg-neutral-100 dark:bg-neutral-800/50' },
           { label: 'Total Lines', value: totalLines.toLocaleString(), icon: ListChecks, color: 'text-blue-600 dark:text-blue-400', bg: 'bg-blue-500/10' },
           { label: 'Total Size', value: `${(totalChars / 1024).toFixed(1)} KB`, icon: FileCode, color: 'text-purple-600 dark:text-purple-400', bg: 'bg-purple-500/10' },
-          { label: 'Schemas', value: '5', icon: Zap, color: 'text-amber-600 dark:text-amber-400', bg: 'bg-amber-500/10' },
+          { label: 'Schemas', value: '8', icon: Zap, color: 'text-amber-600 dark:text-amber-400', bg: 'bg-amber-500/10' },
         ].map((stat) => (
           <div
             key={stat.label}

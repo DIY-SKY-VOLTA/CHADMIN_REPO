@@ -28,6 +28,7 @@ import {
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'react-hot-toast';
 import adminAPI from '@/api/adminAPI';
+import { uploadContestImageFromUrl } from '@/api/contestAPI';
 
 const FILTER_OPTIONS = [
   { key: 'all', label: 'All' },
@@ -67,6 +68,16 @@ const formatDate = (dateStr) => {
       month: 'short', day: 'numeric', year: 'numeric',
     });
   } catch { return '—'; }
+};
+
+const isValidHttpUrl = (value) => {
+  if (!value || typeof value !== 'string') return false;
+  try {
+    const u = new URL(value.trim());
+    return u.protocol === 'http:' || u.protocol === 'https:';
+  } catch {
+    return false;
+  }
 };
 
 const ImagePreview = ({ src, alt, size = 'sm' }) => {
@@ -122,6 +133,11 @@ const ContestImages = () => {
   const [isBackingUp, setIsBackingUp] = useState(null);
   const [isBulkBackingUp, setIsBulkBackingUp] = useState(false);
 
+  // Bulk-select + progress state
+  const [isSelectingAllMatching, setIsSelectingAllMatching] = useState(false);
+  const [bulkProgress, setBulkProgress] = useState(null); // { total, processed, succeeded, failed, errors, done }
+  const headerCheckRef = useRef(null);
+
   // Upload state
   const [uploadTarget, setUploadTarget] = useState(null); // contest being uploaded for
   const [uploadFile, setUploadFile] = useState(null);
@@ -131,7 +147,20 @@ const ContestImages = () => {
   const [isLoadingDetails, setIsLoadingDetails] = useState(false);
   const fileInputRef = useRef(null);
 
+  // Set indeterminate state on the select-all header checkbox when only some
+  // contests on the current page are selected.
+  useEffect(() => {
+    if (!headerCheckRef.current) return;
+    const pageIds = contests.map(c => c.id);
+    const some = pageIds.some(id => checkedContests.has(id));
+    const all = pageIds.length > 0 && pageIds.every(id => checkedContests.has(id));
+    headerCheckRef.current.indeterminate = some && !all;
+  }, [contests, checkedContests]);
+
   const [isDragOver, setIsDragOver] = useState(false);
+  const [uploadMode, setUploadMode] = useState('file'); // 'file' | 'url'
+  const [uploadUrl, setUploadUrl] = useState('');
+  const [urlPreviewError, setUrlPreviewError] = useState(false);
 
   const searchTimerRef = useRef(null);
   const recheckTimerRef = useRef(null);
@@ -274,23 +303,71 @@ const ContestImages = () => {
     }
   };
 
-  // Bulk backup selected
+  const BULK_BACKUP_BATCH = 25;
+
+  // Bulk backup selected contests — runs in batches so the progress modal can
+  // report live per-batch success/failure counts, then shows a final summary.
   const handleBulkBackup = async () => {
     const ids = Array.from(checkedContests);
     if (ids.length === 0) return;
 
+    const progress = { total: ids.length, processed: 0, succeeded: 0, failed: 0, errors: [], done: false };
+    setBulkProgress(progress);
     setIsBulkBackingUp(true);
+
     try {
-      const res = await adminAPI.post('/contests/images/bulk-backup', { contestIds: ids });
-      if (res.success) {
-        toast.success(res.message || 'Bulk backup complete');
-        setCheckedContests(new Set());
-        fetchContests(true);
+      for (let i = 0; i < ids.length; i += BULK_BACKUP_BATCH) {
+        const batch = ids.slice(i, i + BULK_BACKUP_BATCH);
+        try {
+          const res = await adminAPI.post('/contests/images/bulk-backup', { contestIds: batch });
+          if (res.success) {
+            progress.succeeded += res.results?.success || 0;
+            progress.failed += res.results?.failed || 0;
+            if (res.results?.errors?.length) progress.errors.push(...res.results.errors);
+          } else {
+            progress.failed += batch.length;
+            progress.errors.push({ id: 'batch', reason: res.message || 'Batch failed' });
+          }
+        } catch (err) {
+          progress.failed += batch.length;
+          progress.errors.push({ id: 'batch', reason: err?.message || 'Batch request failed' });
+        }
+        progress.processed = Math.min(progress.total, progress.processed + batch.length);
+        setBulkProgress({ ...progress });
       }
-    } catch (err) {
-      toast.error(err?.message || 'Bulk backup failed');
+
+      progress.done = true;
+      setBulkProgress({ ...progress });
+      setCheckedContests(new Set());
+      fetchContests(true);
     } finally {
       setIsBulkBackingUp(false);
+    }
+  };
+
+  // Select ALL contests matching the current filter/search (across every page)
+  const handleSelectAllMatching = async () => {
+    setIsSelectingAllMatching(true);
+    try {
+      const res = await adminAPI.get('/contests/images/health', {
+        params: {
+          page: 1,
+          limit: 100,
+          search: debouncedSearch,
+          filter: activeFilter,
+          sortBy,
+          sortOrder,
+          idsOnly: true,
+        },
+      });
+      if (res.success && res.ids?.length) {
+        setCheckedContests(new Set(res.ids));
+        toast.success(`Selected all ${res.ids.length} matching contests`);
+      }
+    } catch (err) {
+      toast.error(err?.message || 'Failed to select all matching contests');
+    } finally {
+      setIsSelectingAllMatching(false);
     }
   };
 
@@ -333,6 +410,9 @@ const ContestImages = () => {
     setUploadTarget(contest);
     setUploadFile(null);
     setUploadPreview(null);
+    setUploadMode('file');
+    setUploadUrl('');
+    setUrlPreviewError(false);
     setContestDetails(null);
     setIsLoadingDetails(true);
 
@@ -384,25 +464,38 @@ const ContestImages = () => {
     setIsDragOver(false);
   };
 
-  // Handle upload submission
+  // Handle upload submission — file OR URL source
   const handleUploadSubmit = async () => {
-    if (!uploadTarget || !uploadFile) return;
+    if (!uploadTarget) return;
+    if (uploadMode === 'file' && !uploadFile) return;
+    if (uploadMode === 'url' && !isValidHttpUrl(uploadUrl)) return;
 
     setIsUploading(true);
     try {
-      const formData = new FormData();
-      formData.append('contestId', uploadTarget.id);
-      formData.append('image', uploadFile);
-
-      const res = await adminAPI.post('/contests/images/upload', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
+      let res;
+      if (uploadMode === 'url') {
+        res = await uploadContestImageFromUrl(uploadTarget.id, uploadUrl.trim());
+      } else {
+        const formData = new FormData();
+        formData.append('contestId', uploadTarget.id);
+        formData.append('image', uploadFile);
+        res = await adminAPI.post('/contests/images/upload', formData, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        });
+      }
 
       if (res.success) {
-        toast.success('Image uploaded and contest updated successfully');
+        toast.success(
+          uploadMode === 'url'
+            ? 'Image fetched from URL and backed up to R2'
+            : 'Image uploaded and contest updated successfully'
+        );
         setUploadTarget(null);
         setUploadFile(null);
         setUploadPreview(null);
+        setUploadUrl('');
+        setUploadMode('file');
+        setUrlPreviewError(false);
         setContestDetails(null);
         fetchContests(true);
       }
@@ -419,6 +512,9 @@ const ContestImages = () => {
     setUploadTarget(null);
     setUploadFile(null);
     setUploadPreview(null);
+    setUploadUrl('');
+    setUploadMode('file');
+    setUrlPreviewError(false);
     setContestDetails(null);
     setIsDragOver(false);
   };
@@ -433,12 +529,20 @@ const ContestImages = () => {
     });
   };
 
+  // Toggle selection for all contests on the current page, preserving any
+  // selections made on other pages (e.g. via "select all matching").
   const selectAll = () => {
-    if (checkedContests.size === contests.length) {
-      setCheckedContests(new Set());
-    } else {
-      setCheckedContests(new Set(contests.map(c => c.id)));
-    }
+    const pageIds = contests.map(c => c.id);
+    const allPageSelected = pageIds.length > 0 && pageIds.every(id => checkedContests.has(id));
+    setCheckedContests(prev => {
+      const next = new Set(prev);
+      if (allPageSelected) {
+        pageIds.forEach(id => next.delete(id));
+      } else {
+        pageIds.forEach(id => next.add(id));
+      }
+      return next;
+    });
   };
 
   // Get status config
@@ -550,6 +654,46 @@ const ContestImages = () => {
         </div>
 
         <div className="w-full md:w-auto flex flex-wrap items-center gap-3 justify-end">
+          {/* Bulk actions — always visible, counts update live with selection */}
+          {(checkedContests.size > 0 || isSelectingAllMatching) && (
+            <div className="flex items-center gap-2">
+              {checkedContests.size > 0 && (
+                <>
+                  <button
+                    onClick={handleBulkBackup}
+                    disabled={isBulkBackingUp}
+                    className="px-3 py-1.5 rounded-lg border border-neutral-200/50 dark:border-white/5 bg-white dark:bg-[#18181b] hover:bg-neutral-50 dark:hover:bg-white/5 text-neutral-600 hover:text-neutral-900 dark:hover:text-white transition-all shadow-sm flex items-center gap-1.5 text-[11px] font-medium disabled:opacity-40"
+                  >
+                    {isBulkBackingUp ? (
+                      <Loader2 size={12} className="animate-spin" />
+                    ) : (
+                      <CloudDownload size={12} />
+                    )}
+                    Backup ({checkedContests.size})
+                  </button>
+                  <button
+                    onClick={handleBulkRecheck}
+                    disabled={isBulkRechecking}
+                    className="px-3 py-1.5 rounded-lg border border-neutral-200/50 dark:border-white/5 bg-white dark:bg-[#18181b] hover:bg-neutral-50 dark:hover:bg-white/5 text-neutral-600 hover:text-neutral-900 dark:hover:text-white transition-all shadow-sm flex items-center gap-1.5 text-[11px] font-medium disabled:opacity-40"
+                  >
+                    {isBulkRechecking ? (
+                      <Loader2 size={12} className="animate-spin" />
+                    ) : (
+                      <RefreshCw size={12} />
+                    )}
+                    Re-check ({checkedContests.size})
+                  </button>
+                </>
+              )}
+              {isSelectingAllMatching && (
+                <span className="flex items-center gap-1.5 text-[11px] text-neutral-400">
+                  <Loader2 size={12} className="animate-spin" />
+                  Fetching all matching contests...
+                </span>
+              )}
+            </div>
+          )}
+
           {/* Filters */}
           <div className="p-0.5 rounded-lg bg-neutral-200/50 dark:bg-neutral-900/60 border border-neutral-200/40 dark:border-white/5 flex gap-0.5 shadow-inner">
             {FILTER_OPTIONS.map((opt) => (
@@ -567,37 +711,31 @@ const ContestImages = () => {
             ))}
           </div>
 
-          {/* Bulk actions */}
-          {checkedContests.size > 0 && (
-            <div className="flex items-center gap-2">
-              <button
-                onClick={handleBulkBackup}
-                disabled={isBulkBackingUp}
-                className="px-3 py-1.5 rounded-lg border border-neutral-200/50 dark:border-white/5 bg-white dark:bg-[#18181b] hover:bg-neutral-50 dark:hover:bg-white/5 text-neutral-600 hover:text-neutral-900 dark:hover:text-white transition-all shadow-sm flex items-center gap-1.5 text-[11px] font-medium disabled:opacity-40"
-              >
-                {isBulkBackingUp ? (
-                  <Loader2 size={12} className="animate-spin" />
-                ) : (
-                  <CloudDownload size={12} />
-                )}
-                Backup ({checkedContests.size})
-              </button>
-              <button
-                onClick={handleBulkRecheck}
-                disabled={isBulkRechecking}
-                className="px-3 py-1.5 rounded-lg border border-neutral-200/50 dark:border-white/5 bg-white dark:bg-[#18181b] hover:bg-neutral-50 dark:hover:bg-white/5 text-neutral-600 hover:text-neutral-900 dark:hover:text-white transition-all shadow-sm flex items-center gap-1.5 text-[11px] font-medium disabled:opacity-40"
-              >
-                {isBulkRechecking ? (
-                  <Loader2 size={12} className="animate-spin" />
-                ) : (
-                  <RefreshCw size={12} />
-                )}
-                Re-check ({checkedContests.size})
-              </button>
-            </div>
-          )}
         </div>
       </div>
+
+      {/* Select-all-matching banner — shown when the whole current page is selected but more matching contests exist */}
+      {!isLoading && contests.length > 0 && contests.every(c => checkedContests.has(c.id)) && pagination.total > contests.length && (
+        <div className="shrink-0 px-6 pb-4 flex items-center justify-between">
+          <p className="text-[11px] text-neutral-500">
+            All <span className="font-semibold text-neutral-700 dark:text-neutral-300">{contests.length}</span> contests on this page are selected.
+          </p>
+          <button
+            onClick={handleSelectAllMatching}
+            disabled={isSelectingAllMatching || checkedContests.size >= pagination.total || isBulkBackingUp}
+            className="px-3 py-1.5 rounded-lg border border-blue-200/60 dark:border-blue-500/25 bg-blue-500/5 hover:bg-blue-500/10 text-blue-600 dark:text-blue-400 text-[11px] font-semibold transition-all shadow-sm flex items-center gap-1.5 disabled:opacity-40"
+          >
+            {isSelectingAllMatching ? (
+              <Loader2 size={12} className="animate-spin" />
+            ) : (
+              <Check size={12} />
+            )}
+            {checkedContests.size >= pagination.total
+              ? `All ${pagination.total} selected`
+              : `Select all ${pagination.total} matching`}
+          </button>
+        </div>
+      )}
 
       {/* Main Content */}
       <div className="flex-1 overflow-y-auto px-6 pb-6">
@@ -625,10 +763,12 @@ const ContestImages = () => {
               <div className="bg-neutral-50/50 dark:bg-neutral-900/30 px-5 py-2.5 flex items-center text-[10px] font-semibold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider">
                 <div className="w-[3%] flex items-center">
                   <input
+                    ref={headerCheckRef}
                     type="checkbox"
-                    checked={contests.length > 0 && checkedContests.size === contests.length}
+                    checked={contests.length > 0 && contests.every(c => checkedContests.has(c.id))}
                     onChange={selectAll}
-                    className="rounded border-neutral-300 dark:border-neutral-700"
+                    disabled={isBulkBackingUp}
+                    className="rounded border-neutral-300 dark:border-neutral-700 disabled:opacity-40"
                   />
                 </div>
                 <div className="w-[4%]"></div>
@@ -678,7 +818,8 @@ const ContestImages = () => {
                           type="checkbox"
                           checked={checkedContests.has(contest.id)}
                           onChange={() => toggleSelect(contest.id)}
-                          className="rounded border-neutral-300 dark:border-neutral-700"
+                          disabled={isBulkBackingUp}
+                          className="rounded border-neutral-300 dark:border-neutral-700 disabled:opacity-40"
                         />
                       </div>
 
@@ -825,6 +966,94 @@ const ContestImages = () => {
           </div>
         )}
       </div>
+
+      {/* Bulk Backup Progress Modal */}
+      <AnimatePresence>
+        {bulkProgress && (
+          <>
+            <div className="fixed inset-0 z-[110] bg-black/60 backdrop-blur-[2px]" onClick={() => { if (bulkProgress.done) setBulkProgress(null); }} />
+            <div className="fixed inset-0 z-[120] flex items-center justify-center p-4">
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.95 }}
+                className="w-full max-w-md bg-white dark:bg-[#151518] rounded-xl border border-neutral-200/50 dark:border-white/5 p-5 shadow-2xl space-y-4"
+              >
+                {/* Header */}
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-lg bg-blue-500/10 flex items-center justify-center text-blue-600 dark:text-blue-400 shrink-0">
+                    <CloudDownload size={18} />
+                  </div>
+                  <div className="min-w-0">
+                    <h3 className="text-xs font-bold text-neutral-900 dark:text-white uppercase tracking-wide">
+                      {bulkProgress.done ? 'Backup Complete' : 'Backing Up Images'}
+                    </h3>
+                    <p className="text-[10px] text-neutral-400 mt-0.5">
+                      {bulkProgress.done
+                        ? `${bulkProgress.succeeded} succeeded, ${bulkProgress.failed} failed`
+                        : `Processing ${bulkProgress.processed} of ${bulkProgress.total}`}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Progress bar */}
+                <div>
+                  <div className="h-2 rounded-full bg-neutral-100 dark:bg-neutral-900 border border-neutral-200/40 dark:border-white/5 overflow-hidden">
+                    <div
+                      className="h-full bg-blue-500 transition-all duration-300 ease-out"
+                      style={{ width: `${bulkProgress.total ? Math.round((bulkProgress.processed / bulkProgress.total) * 100) : 0}%` }}
+                    />
+                  </div>
+                  <div className="flex items-center justify-between mt-1.5">
+                    <span className="text-[10px] text-neutral-400">
+                      {bulkProgress.total ? Math.round((bulkProgress.processed / bulkProgress.total) * 100) : 0}%
+                    </span>
+                    <span className="text-[10px] flex items-center gap-2">
+                      <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-semibold">
+                        <Check size={11} /> {bulkProgress.succeeded}
+                      </span>
+                      <span className="flex items-center gap-1 text-red-500 font-semibold">
+                        <X size={11} /> {bulkProgress.failed}
+                      </span>
+                    </span>
+                  </div>
+                </div>
+
+                {/* Failure summary */}
+                {bulkProgress.errors.length > 0 && (
+                  <div className="bg-red-500/5 border border-red-500/15 rounded-lg p-3 max-h-40 overflow-y-auto custom-scrollbar">
+                    <p className="text-[9px] font-bold text-red-500/80 uppercase tracking-wider mb-1.5">
+                      Failed ({bulkProgress.errors.length})
+                    </p>
+                    <ul className="space-y-1">
+                      {bulkProgress.errors.slice(0, 8).map((err, i) => (
+                        <li key={i} className="text-[10px] text-red-600/80 dark:text-red-400/80 flex items-start gap-1.5">
+                          <AlertTriangle size={10} className="shrink-0 mt-0.5" />
+                          <span className="break-all">{err.reason}</span>
+                        </li>
+                      ))}
+                      {bulkProgress.errors.length > 8 && (
+                        <li className="text-[10px] text-neutral-400">…and {bulkProgress.errors.length - 8} more</li>
+                      )}
+                    </ul>
+                  </div>
+                )}
+
+                {/* Footer */}
+                <div className="flex gap-3 pt-1">
+                  <button
+                    onClick={() => setBulkProgress(null)}
+                    disabled={!bulkProgress.done}
+                    className="flex-1 py-2 rounded-lg text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 dark:bg-blue-600 dark:hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-sm"
+                  >
+                    {bulkProgress.done ? 'Done' : 'Working...'}
+                  </button>
+                </div>
+              </motion.div>
+            </div>
+          </>
+        )}
+      </AnimatePresence>
 
       {/* Recheck Result Toast */}
       {recheckResult && (
@@ -1147,9 +1376,30 @@ const ContestImages = () => {
                       Upload Contest Image
                     </h3>
                     <p className="text-[10px] text-neutral-400 mt-0.5">
-                      Upload an image you generated externally for this contest
+                      Upload a file or paste a working image URL from the contest's site
                     </p>
                   </div>
+                </div>
+
+                {/* Source mode toggle: file upload vs URL */}
+                <div className="p-0.5 rounded-lg bg-neutral-200/50 dark:bg-neutral-900/60 border border-neutral-200/40 dark:border-white/5 flex gap-0.5 shadow-inner">
+                  {[
+                    { key: 'file', label: 'Upload File', icon: FileUp },
+                    { key: 'url', label: 'Paste URL', icon: Globe },
+                  ].map((opt) => (
+                    <button
+                      key={opt.key}
+                      onClick={() => { setUploadMode(opt.key); setUrlPreviewError(false); }}
+                      className={`flex-1 px-3 py-1.5 text-[11px] font-semibold rounded-md transition-all flex items-center justify-center gap-1.5 ${
+                        uploadMode === opt.key
+                          ? 'bg-white dark:bg-[#1b1b1e] text-neutral-900 dark:text-white shadow-sm'
+                          : 'text-neutral-500 dark:text-neutral-400 hover:text-neutral-800 dark:hover:text-neutral-300'
+                      }`}
+                    >
+                      <opt.icon size={12} strokeWidth={1.5} />
+                      {opt.label}
+                    </button>
+                  ))}
                 </div>
 
                 {/* Contest Details (for reference) */}
@@ -1209,6 +1459,7 @@ const ContestImages = () => {
                 </div>
 
                 {/* File Drop Zone */}
+                {uploadMode === 'file' && (
                 <div
                   onClick={() => fileInputRef.current?.click()}
                   onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
@@ -1277,6 +1528,61 @@ const ContestImages = () => {
                     </div>
                   )}
                 </div>
+                )}
+
+                {/* URL Source */}
+                {uploadMode === 'url' && (
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-2 bg-white dark:bg-[#1b1b1e] border border-neutral-200/60 dark:border-white/5 rounded-lg px-3 py-2 focus-within:border-neutral-400 dark:focus-within:border-neutral-600 transition-all shadow-sm">
+                      <Globe size={14} className="text-neutral-400 shrink-0" />
+                      <input
+                        type="url"
+                        value={uploadUrl}
+                        onChange={(e) => { setUploadUrl(e.target.value); setUrlPreviewError(false); }}
+                        placeholder="https://example.com/contest-image.jpg"
+                        className="w-full bg-transparent text-xs text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 focus:outline-none"
+                      />
+                      {uploadUrl && (
+                        <button
+                          onClick={() => { setUploadUrl(''); setUrlPreviewError(false); }}
+                          className="shrink-0 text-neutral-400 hover:text-neutral-800 dark:hover:text-white transition-colors"
+                        >
+                          <X size={12} />
+                        </button>
+                      )}
+                    </div>
+
+                    {uploadUrl && !urlPreviewError ? (
+                      <div className="max-h-[200px] overflow-hidden rounded-lg border border-neutral-200/50 dark:border-white/10 bg-neutral-100 dark:bg-neutral-900/30">
+                        <img
+                          src={uploadUrl}
+                          alt="URL preview"
+                          className="max-h-[200px] w-full object-contain"
+                          onError={() => setUrlPreviewError(true)}
+                        />
+                      </div>
+                    ) : urlPreviewError ? (
+                      <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2.5 text-[10px] text-amber-600 dark:text-amber-400 flex items-start gap-2">
+                        <AlertTriangle size={12} className="shrink-0 mt-0.5" />
+                        <span>
+                          Couldn't load a preview from this URL. The server will still attempt to fetch it — double-check it points directly to an image file.
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="rounded-lg border border-dashed border-neutral-300/40 dark:border-neutral-700/40 bg-neutral-50/30 dark:bg-[#1b1b1e]/20 px-3 py-5 text-center">
+                        <Globe size={20} className="mx-auto text-neutral-400 dark:text-neutral-500 mb-1.5" strokeWidth={1.5} />
+                        <p className="text-[11px] font-medium text-neutral-500 dark:text-neutral-400">
+                          Paste a working image URL to preview it here
+                        </p>
+                      </div>
+                    )}
+
+                    <p className="text-[10px] text-neutral-400 dark:text-neutral-500 leading-relaxed">
+                      The server fetches the image from the URL, compresses it to WebP (best-effort AVIF),
+                      uploads it to Cloudflare R2, and stores it as the contest's primary + backup.
+                    </p>
+                  </div>
+                )}
 
                 {/* Footer Buttons */}
                 <div className="flex gap-3 pt-1">
@@ -1288,18 +1594,18 @@ const ContestImages = () => {
                   </button>
                   <button
                     onClick={handleUploadSubmit}
-                    disabled={!uploadFile || isUploading}
+                    disabled={isUploading || (uploadMode === 'file' ? !uploadFile : !isValidHttpUrl(uploadUrl))}
                     className="flex-1 py-2 rounded-lg text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 dark:bg-emerald-600 dark:hover:bg-emerald-500 disabled:opacity-40 transition-all shadow-sm flex items-center justify-center gap-1.5"
                   >
                     {isUploading ? (
                       <>
                         <Loader2 size={12} className="animate-spin" />
-                        Uploading...
+                        {uploadMode === 'url' ? 'Fetching & backing up...' : 'Uploading...'}
                       </>
                     ) : (
                       <>
                         <Upload size={12} />
-                        Upload & Replace
+                        {uploadMode === 'url' ? 'Fetch & Backup' : 'Upload & Replace'}
                       </>
                     )}
                   </button>

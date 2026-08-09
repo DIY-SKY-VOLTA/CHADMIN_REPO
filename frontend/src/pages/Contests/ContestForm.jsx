@@ -41,7 +41,7 @@ import {
 } from './contestFormUI';
 
 /* ────────────────────────────────────────────────────────────────────────────
-   Constants — must match Phase2 Contests.js v3.0 + Prompts.txt v4.1 schema
+   Constants — must match Phase2 Contests.js v3.0 + contest-structuring-v4.1.txt schema
 ──────────────────────────────────────────────────────────────────────────── */
 
 const CANONICAL_CATEGORIES = [
@@ -337,7 +337,7 @@ const mapDocToForm = (doc) => {
 /**
  * Build the canonical payload. Empty values are sent as `null` (never ""),
  * which the backend normalizer (cleanString/cleanNumber/toDate) then strips
- * into a clean document. Mirrors Prompts.txt v4.1 field names exactly.
+ * into a clean document. Mirrors contest-structuring-v4.1.txt field names exactly.
  */
 const buildPayload = (form) => {
   const str = (v) => (typeof v === 'string' && v.trim() !== '' ? v.trim() : null);

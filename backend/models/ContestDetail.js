@@ -37,7 +37,7 @@ const contentSchema = new mongoose.Schema({
     notIdealFor: [{ type: String }]
   },
   readingTime: { type: Number, min: 1 },
-  // Hackathon-specific content fields (Prompts-hackathons.txt v1.1)
+  // Hackathon-specific content fields (hackathon-structuring-v1.1.txt)
   judgingProcess: { type: String },          // How judging works: rounds, format, timeline
   mentorshipDetails: { type: String },       // Available mentorship: schedule, format, who provides it
   resourceOfferings: [{

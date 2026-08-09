@@ -31,6 +31,9 @@ export const uploadContestImage = (contestId, file) => {
   });
 };
 
+export const uploadContestImageFromUrl = (contestId, imageUrl) =>
+  adminAPI.post('/contests/images/upload-url', { contestId, imageUrl });
+
 /**
  * DETAILED GUIDE (contest_details collection) — the "AI-POWERED INSIGHTS"
  * section on the public contest detail page.
