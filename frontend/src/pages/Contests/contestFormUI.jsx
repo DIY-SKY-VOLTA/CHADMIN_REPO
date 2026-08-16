@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef, useLayoutEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { Plus, X, Trash2, ChevronDown, ChevronLeft, ChevronRight, Calendar, Clock } from 'lucide-react';
+import { Plus, X, Trash2, ChevronDown, ChevronLeft, ChevronRight, Calendar, Clock, Copy, Check } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'react-hot-toast';
+import { copyToClipboard } from '@/utils/clipboard';
 
 /* ────────────────────────────────────────────────────────────────────────────
    Shared UI primitives for the admin contest forms (ContestForm + details).
@@ -27,15 +28,43 @@ export const Field = ({ label, required, hint, className, children, counter }) =
   </div>
 );
 
-export const TextInput = ({ value, onChange, placeholder, type = 'text', className }) => (
-  <input
-    type={type}
-    value={value ?? ''}
-    onChange={(e) => onChange(e.target.value)}
-    placeholder={placeholder}
-    className={`${inputCls} ${className || ''}`}
-  />
-);
+export const TextInput = ({ value, onChange, placeholder, type = 'text', className }) => {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    const text = value ?? '';
+    if (!text) return;
+    const ok = await copyToClipboard(text);
+    if (ok) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } else {
+      toast.error('Failed to copy');
+    }
+  };
+
+  return (
+    <div className="relative">
+      <input
+        type={type}
+        value={value ?? ''}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        className={`${inputCls} ${className || ''} pr-10`}
+      />
+      {value && (
+        <button
+          type="button"
+          onClick={handleCopy}
+          className="absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300 transition-colors"
+          aria-label="Copy to clipboard"
+        >
+          {copied ? <Check size={13} className="text-emerald-500" /> : <Copy size={13} />}
+        </button>
+      )}
+    </div>
+  );
+};
 
 const pad2 = (n) => String(n).padStart(2, '0');
 const todayStr = () => {
@@ -285,15 +314,43 @@ export const DateTimePicker = ({ value, onChange, className }) => {
   );
 };
 
-export const TextArea = ({ value, onChange, placeholder, rows = 3, className }) => (
-  <textarea
-    value={value ?? ''}
-    onChange={(e) => onChange(e.target.value)}
-    placeholder={placeholder}
-    rows={rows}
-    className={`${inputCls} resize-y leading-relaxed ${className || ''}`}
-  />
-);
+export const TextArea = ({ value, onChange, placeholder, rows = 3, className }) => {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    const text = value ?? '';
+    if (!text) return;
+    const ok = await copyToClipboard(text);
+    if (ok) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } else {
+      toast.error('Failed to copy');
+    }
+  };
+
+  return (
+    <div className="relative">
+      <textarea
+        value={value ?? ''}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        rows={rows}
+        className={`${inputCls} resize-y leading-relaxed ${className || ''} pr-10`}
+      />
+      {value && (
+        <button
+          type="button"
+          onClick={handleCopy}
+          className="absolute right-3 top-3 p-1 rounded text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300 transition-colors"
+          aria-label="Copy to clipboard"
+        >
+          {copied ? <Check size={13} className="text-emerald-500" /> : <Copy size={13} />}
+        </button>
+      )}
+    </div>
+  );
+};
 
 export const Select = ({ value, onChange, options, placeholder, className }) => (
   <select value={value ?? ''} onChange={(e) => onChange(e.target.value)} className={`${inputCls} ${className || ''}`}>
@@ -471,20 +528,19 @@ export const ListItemEditor = ({ items = [], onChange, fields, addLabel = 'Add I
                   {f.label}
                 </label>
                 {f.type === 'textarea' ? (
-                  <textarea
+                  <TextArea
                     value={item[f.key] ?? ''}
-                    onChange={(e) => updateItem(idx, f.key, e.target.value)}
+                    onChange={(v) => updateItem(idx, f.key, v)}
                     rows={f.rows || 2}
                     placeholder={f.placeholder}
-                    className={`${inputCls} resize-none`}
+                    className="resize-none"
                   />
                 ) : (
-                  <input
+                  <TextInput
                     type={f.type || 'text'}
                     value={item[f.key] ?? ''}
-                    onChange={(e) => updateItem(idx, f.key, e.target.value)}
+                    onChange={(v) => updateItem(idx, f.key, v)}
                     placeholder={f.placeholder}
-                    className={inputCls}
                   />
                 )}
               </div>
