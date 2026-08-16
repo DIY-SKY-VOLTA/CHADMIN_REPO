@@ -33,14 +33,25 @@ app.use(morgan('dev'));
 
 // Database Connection — with timeouts and pool settings
 // Prevents slow queries from exhausting the connection pool
-mongoose.connect(process.env.MONGODB_URI, {
-  serverSelectionTimeoutMS: 10000,   // fail fast if cluster is unresponsive (was default 30000)
-  socketTimeoutMS: 45000,            // max 45s per query (was default 0 = no timeout)
-  maxPoolSize: 10,                    // limit concurrent connections
-  heartbeatFrequencyMS: 10000,        // check cluster health every 10s
-})
-  .then(() => console.log('✅ Admin Database Connected'))
-  .catch(err => console.error('❌ Database Connection Error:', err));
+// Retries with backoff so transient failures (e.g. DNS blips) don't leave the
+// server running with no database. Mongoose does NOT retry the initial connect.
+const connectDB = async (attempt = 1) => {
+  try {
+    await mongoose.connect(process.env.MONGODB_URI, {
+      serverSelectionTimeoutMS: 10000,   // fail fast if cluster is unresponsive (was default 30000)
+      socketTimeoutMS: 45000,            // max 45s per query (was default 0 = no timeout)
+      maxPoolSize: 10,                    // limit concurrent connections
+      heartbeatFrequencyMS: 10000,        // check cluster health every 10s
+    });
+    console.log('✅ Admin Database Connected');
+  } catch (err) {
+    console.error(`❌ Database Connection Error (attempt ${attempt}):`, err.message);
+    const delay = Math.min(1000 * 2 ** (attempt - 1), 15000); // 1s, 2s, 4s, ... max 15s
+    console.log(`↻ Retrying in ${delay / 1000}s...`);
+    setTimeout(() => connectDB(attempt + 1), delay);
+  }
+};
+connectDB();
 
 // Routes
 app.use('/api/admin/auth', authRoutes);

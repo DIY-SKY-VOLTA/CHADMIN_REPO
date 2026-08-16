@@ -4,27 +4,30 @@ import {
   Search,
   X,
   Trophy,
-  Plus,
   Loader2,
   ChevronLeft,
   ChevronRight,
   RefreshCw,
   ExternalLink,
   Pencil,
-  Archive,
-  RotateCcw,
-  Calendar,
-  DollarSign,
   Sparkles,
+  Archive,
+  FileText,
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import adminAPI from '@/api/adminAPI';
-import { listContestCategories } from '@/api/contestAPI';
 
 const STATUS_CONFIG = {
   open: { label: 'Open', bg: 'bg-emerald-500/10', text: 'text-emerald-600 dark:text-emerald-400', border: 'border-emerald-500/15' },
   scheduled: { label: 'Scheduled', bg: 'bg-blue-500/10', text: 'text-blue-600 dark:text-blue-400', border: 'border-blue-500/15' },
   closed: { label: 'Closed', bg: 'bg-neutral-500/10', text: 'text-neutral-500 dark:text-neutral-400', border: 'border-neutral-500/15' },
+};
+
+const GUIDE_STATUS_CONFIG = {
+  completed: { label: 'Completed', bg: 'bg-emerald-500/10', text: 'text-emerald-600 dark:text-emerald-400', border: 'border-emerald-500/15' },
+  pending: { label: 'Pending', bg: 'bg-amber-500/10', text: 'text-amber-600 dark:text-amber-400', border: 'border-amber-500/15' },
+  processing: { label: 'Processing', bg: 'bg-blue-500/10', text: 'text-blue-600 dark:text-blue-400', border: 'border-blue-500/15' },
+  failed: { label: 'Failed', bg: 'bg-red-500/10', text: 'text-red-600 dark:text-red-400', border: 'border-red-500/15' },
 };
 
 const formatDate = (dateStr) => {
@@ -34,19 +37,6 @@ const formatDate = (dateStr) => {
   } catch {
     return '—';
   }
-};
-
-const formatPrize = (prize) => {
-  if (!prize) return '—';
-  if (prize.prizeSummary) return prize.prizeSummary;
-  const usd = Number(prize.totalUSD) || 0;
-  if (usd > 0) {
-    return usd >= 1000
-      ? `$${(usd / 1000).toFixed(usd >= 100000 ? 0 : 1)}k`
-      : `$${usd.toLocaleString()}`;
-  }
-  if (prize.isMonetary) return 'Cash prize';
-  return 'Non-monetary';
 };
 
 const Thumb = ({ src, alt }) => {
@@ -74,7 +64,7 @@ const Thumb = ({ src, alt }) => {
   );
 };
 
-const Contests = () => {
+const ContestDetails = () => {
   const navigate = useNavigate();
   const [contests, setContests] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -82,19 +72,10 @@ const Contests = () => {
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
-  const [categoryFilter, setCategoryFilter] = useState('all');
   const [showArchived, setShowArchived] = useState(false);
   const [page, setPage] = useState(1);
   const [pagination, setPagination] = useState({ total: 0, pages: 1 });
-  const [categories, setCategories] = useState([]);
-  const [busy, setBusy] = useState(null); // id being archived/restored
   const searchTimerRef = useRef(null);
-
-  useEffect(() => {
-    return () => {
-      if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
-    };
-  }, []);
 
   useEffect(() => {
     if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
@@ -110,83 +91,30 @@ const Contests = () => {
   const fetchContests = useCallback(async (silent = false) => {
     if (!silent) setIsLoading(true);
     try {
-      const res = await adminAPI.get('/contests', {
+      const res = await adminAPI.get('/contests/with-details', {
         params: {
           page,
           limit: 25,
           search: debouncedSearch,
           type: typeFilter,
           status: statusFilter,
-          category: categoryFilter,
           archived: showArchived,
         },
       });
       if (res.success) {
         setContests(res.contests || []);
         setPagination(res.pagination || { total: 0, pages: 1 });
-        // Collect categories for the filter (from fetched rows)
-        setCategories(prev => {
-          const merged = new Map(prev.map(c => [c, c]));
-          res.contests.forEach(c => { if (c.category) merged.set(c.category, c.category); });
-          return [...merged.values()].sort();
-        });
       }
     } catch (err) {
-      toast.error(err?.message || 'Failed to load contests');
+      toast.error(err?.message || 'Failed to load contest details');
     } finally {
       if (!silent) setIsLoading(false);
     }
-  }, [page, debouncedSearch, typeFilter, statusFilter, categoryFilter, showArchived]);
+  }, [page, debouncedSearch, typeFilter, statusFilter, showArchived]);
 
   useEffect(() => {
     fetchContests();
   }, [fetchContests]);
-
-  // Populate the category filter from ALL categories in the DB (not just the
-  // categories present on the currently loaded page).
-  useEffect(() => {
-    let mounted = true;
-    listContestCategories()
-      .then((res) => {
-        if (mounted && res.success) {
-          setCategories((res.categories || []).filter(Boolean).sort());
-        }
-      })
-      .catch(() => {
-        // fall back to categories derived from fetched rows
-      });
-    return () => { mounted = false; };
-  }, []);
-
-  const handleArchive = async (contest) => {
-    setBusy(contest._id);
-    try {
-      const res = await adminAPI.delete(`/contests/${contest._id}`);
-      if (res.success) {
-        toast.success(showArchived ? 'Contest archived' : 'Contest archived');
-        fetchContests(true);
-      }
-    } catch (err) {
-      toast.error(err?.message || 'Failed to archive contest');
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const handleRestore = async (contest) => {
-    setBusy(contest._id);
-    try {
-      const res = await adminAPI.post(`/contests/${contest._id}/restore`);
-      if (res.success) {
-        toast.success('Contest restored');
-        fetchContests(true);
-      }
-    } catch (err) {
-      toast.error(err?.message || 'Failed to restore contest');
-    } finally {
-      setBusy(null);
-    }
-  };
 
   const totalPages = Math.max(1, pagination.pages || 1);
 
@@ -196,13 +124,13 @@ const Contests = () => {
       <div className="shrink-0 flex items-center justify-between px-6 py-4 border-b border-neutral-200/50 dark:border-white/5 bg-white/40 dark:bg-[#121214]/40 backdrop-blur-sm">
         <div>
           <h1 className="text-base font-semibold text-neutral-900 dark:text-neutral-100 flex items-center gap-2">
-            <Trophy size={16} strokeWidth={1.5} className="text-neutral-400" />
-            Contests
+            <FileText size={16} strokeWidth={1.5} className="text-amber-500" />
+            Contest Details
           </h1>
           <p className="text-[11px] text-neutral-400 dark:text-neutral-500 mt-0.5">
             {pagination.total > 0
-              ? `${pagination.total} contest${pagination.total === 1 ? '' : 's'}${showArchived ? ' (incl. archived)' : ''}`
-              : 'Add and manage contests — same schema as the automation pipeline'}
+              ? `${pagination.total} contest${pagination.total === 1 ? '' : 's'} with a DETAILED GUIDE on the live page`
+              : 'Only contests that have a DETAILED GUIDE (contest_details) page'}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -214,11 +142,11 @@ const Contests = () => {
             Refresh
           </button>
           <button
-            onClick={() => navigate('/contests/new')}
-            className="px-3 py-1.5 rounded-lg bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 hover:opacity-90 transition-all shadow-sm flex items-center gap-1.5 text-[11px] font-semibold"
+            onClick={() => navigate('/contests')}
+            className="px-3 py-1.5 rounded-lg border border-neutral-200/50 dark:border-white/5 bg-white dark:bg-[#18181b] hover:bg-neutral-50 dark:hover:bg-white/5 text-neutral-500 hover:text-neutral-900 dark:hover:text-white transition-all shadow-sm flex items-center gap-1.5 text-[11px] font-medium"
           >
-            <Plus size={12} strokeWidth={2.5} />
-            Add Contest
+            <Trophy size={12} strokeWidth={1.5} />
+            All Contests
           </button>
         </div>
       </div>
@@ -261,16 +189,6 @@ const Contests = () => {
             <option value="scheduled">Scheduled</option>
             <option value="closed">Closed</option>
           </select>
-          <select
-            value={categoryFilter}
-            onChange={(e) => { setCategoryFilter(e.target.value); setPage(1); }}
-            className="max-w-[160px] px-2.5 py-1.5 bg-white dark:bg-[#151518] border border-neutral-200/60 dark:border-white/5 rounded-lg text-[11px] font-medium text-neutral-600 dark:text-neutral-300 focus:outline-none"
-          >
-            <option value="all">All Categories</option>
-            {categories.map((c) => (
-              <option key={c} value={c}>{c}</option>
-            ))}
-          </select>
           <label className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-white dark:bg-[#151518] border border-neutral-200/60 dark:border-white/5 cursor-pointer text-[11px] font-medium text-neutral-500 dark:text-neutral-400">
             <input
               type="checkbox"
@@ -292,22 +210,24 @@ const Contests = () => {
           </div>
         ) : contests.length === 0 ? (
           <div className="bg-white dark:bg-[#151518]/40 border border-neutral-200/40 dark:border-white/5 rounded-2xl flex flex-col items-center justify-center py-20 shadow-sm">
-            <Trophy size={28} strokeWidth={1.25} className="text-neutral-300 dark:text-neutral-700" />
+            <FileText size={28} strokeWidth={1.25} className="text-neutral-300 dark:text-neutral-700" />
             <p className="text-xs font-semibold text-neutral-800 dark:text-neutral-300 mt-3">
-              {debouncedSearch || typeFilter !== 'all' || statusFilter !== 'all' || categoryFilter !== 'all'
+              {debouncedSearch || typeFilter !== 'all' || statusFilter !== 'all'
                 ? 'No matching contests found'
-                : 'No contests yet'}
+                : 'No DETAILED GUIDE pages yet'}
             </p>
             <p className="text-[11px] text-neutral-400 mt-1">
-              {debouncedSearch ? 'Try adjusting your search or filters' : 'Click "Add Contest" to create your first one'}
+              {debouncedSearch
+                ? 'Try adjusting your search or filters'
+                : 'Open a contest from the Contests page and save a Detailed Guide to see it here'}
             </p>
             {!debouncedSearch && (
               <button
-                onClick={() => navigate('/contests/new')}
+                onClick={() => navigate('/contests')}
                 className="mt-4 px-3 py-1.5 rounded-lg bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 hover:opacity-90 transition-all shadow-sm flex items-center gap-1.5 text-[11px] font-semibold"
               >
-                <Plus size={12} strokeWidth={2.5} />
-                Add Contest
+                <Trophy size={12} strokeWidth={2.5} />
+                Go to Contests
               </button>
             )}
           </div>
@@ -317,20 +237,22 @@ const Contests = () => {
             <div className="bg-neutral-50/50 dark:bg-neutral-900/30 px-5 py-2.5 flex items-center text-[10px] font-semibold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider">
               <div className="w-[30%]">Contest</div>
               <div className="w-[13%]">Category</div>
-              <div className="w-[10%]">Type</div>
-              <div className="w-[9%]">Status</div>
-              <div className="w-[13%]">Deadline</div>
-              <div className="w-[12%]">Prize</div>
+              <div className="w-[9%]">Type</div>
+              <div className="w-[8%]">Status</div>
+              <div className="w-[27%]">Detailed Guide</div>
               <div className="w-[13%] text-right">Actions</div>
             </div>
             {/* Rows */}
             <div className="divide-y divide-neutral-200/50 dark:divide-white/5">
               {contests.map((contest) => {
                 const statusCfg = STATUS_CONFIG[contest.status] || STATUS_CONFIG.closed;
+                const guide = contest.detail || {};
+                const guideCfg = GUIDE_STATUS_CONFIG[guide.status] || GUIDE_STATUS_CONFIG.pending;
+                const qualityScore = guide.metadata?.qualityScore;
                 return (
                   <div
                     key={contest._id}
-                    onClick={() => navigate(`/contests/${contest._id}/edit`)}
+                    onClick={() => navigate(`/contests/${contest._id}/details`)}
                     className={`px-5 py-2.5 flex items-center hover:bg-neutral-50 dark:hover:bg-white/5 transition-colors cursor-pointer text-xs text-neutral-700 dark:text-neutral-300 ${contest.archivedAt ? 'opacity-55' : ''}`}
                   >
                     {/* Title */}
@@ -358,7 +280,7 @@ const Contests = () => {
                     </div>
 
                     {/* Type */}
-                    <div className="w-[10%] pr-3">
+                    <div className="w-[9%] pr-3">
                       <span className={`px-1.5 py-0.5 rounded text-[9px] font-semibold border ${contest.type === 'hackathon'
                         ? 'bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/15'
                         : 'bg-neutral-100 dark:bg-neutral-800/50 text-neutral-500 dark:text-neutral-400 border-neutral-200/50 dark:border-white/5'}`}>
@@ -366,42 +288,47 @@ const Contests = () => {
                       </span>
                     </div>
 
-                    {/* Status */}
-                    <div className="w-[9%] pr-3">
+                    {/* Contest status */}
+                    <div className="w-[8%] pr-3">
                       <span className={`inline-flex px-1.5 py-0.5 rounded text-[9px] font-bold border ${statusCfg.bg} ${statusCfg.text} ${statusCfg.border}`}>
                         {statusCfg.label}
                       </span>
                     </div>
 
-                    {/* Deadline */}
-                    <div className="w-[13%] pr-3 flex items-center gap-1.5 text-[10px] text-neutral-500 dark:text-neutral-400">
-                      <Calendar size={10} className="text-neutral-400 shrink-0" />
-                      {contest.timeline?.submissionDeadlineUTC
-                        ? formatDate(contest.timeline.submissionDeadlineUTC)
-                        : '—'}
-                    </div>
-
-                    {/* Prize */}
-                    <div className="w-[12%] pr-3 flex items-center gap-1.5 text-[10px] text-neutral-500 dark:text-neutral-400 min-w-0">
-                      <DollarSign size={10} className="text-neutral-400 shrink-0" />
-                      <span className="truncate">{formatPrize(contest.prize)}</span>
+                    {/* Guide */}
+                    <div className="w-[27%] pr-3 min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        <span className={`inline-flex px-1.5 py-0.5 rounded text-[9px] font-bold border ${guideCfg.bg} ${guideCfg.text} ${guideCfg.border}`}>
+                          {guideCfg.label}
+                        </span>
+                        <span className="text-[9px] font-mono text-neutral-400 dark:text-neutral-500">
+                          v{guide.version || 1}
+                          {typeof qualityScore === 'number' && (
+                            <span className="ml-1.5">· {qualityScore}% quality</span>
+                          )}
+                        </span>
+                      </div>
+                      <span className="text-[9px] text-neutral-400 dark:text-neutral-500 truncate block mt-1">
+                        Updated {formatDate(guide.updatedAt || guide.generatedAt)}
+                        {guide.generatedBy && guide.generatedBy !== 'admin' ? ` · ${guide.generatedBy}` : ''}
+                      </span>
                     </div>
 
                     {/* Actions */}
                     <div className="w-[13%] flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
+                      <button
+                        onClick={() => navigate(`/contests/${contest._id}/details`)}
+                        className="p-1.5 rounded hover:bg-amber-500/10 text-neutral-500 hover:text-amber-600 dark:hover:text-amber-400 transition-colors"
+                        title="Edit DETAILED GUIDE"
+                      >
+                        <Sparkles size={13} />
+                      </button>
                       <button
                         onClick={() => navigate(`/contests/${contest._id}/edit`)}
                         className="p-1.5 rounded hover:bg-neutral-100 dark:hover:bg-white/5 text-neutral-500 hover:text-neutral-900 dark:hover:text-white transition-colors"
                         title="Edit contest"
                       >
                         <Pencil size={13} />
-                      </button>
-                      <button
-                        onClick={() => navigate(`/contests/${contest._id}/details`)}
-                        className="p-1.5 rounded hover:bg-amber-500/10 text-neutral-500 hover:text-amber-600 dark:hover:text-amber-400 transition-colors"
-                        title="Edit DETAILED GUIDE (AI insights on the public page)"
-                      >
-                        <Sparkles size={13} />
                       </button>
                       {contest.link && (
                         <a
@@ -413,25 +340,6 @@ const Contests = () => {
                         >
                           <ExternalLink size={13} />
                         </a>
-                      )}
-                      {contest.archivedAt ? (
-                        <button
-                          onClick={() => handleRestore(contest)}
-                          disabled={busy === contest._id}
-                          className="p-1.5 rounded hover:bg-emerald-500/10 text-neutral-500 hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors disabled:opacity-30"
-                          title="Restore contest"
-                        >
-                          {busy === contest._id ? <Loader2 size={13} className="animate-spin" /> : <RotateCcw size={13} />}
-                        </button>
-                      ) : (
-                        <button
-                          onClick={() => handleArchive(contest)}
-                          disabled={busy === contest._id}
-                          className="p-1.5 rounded hover:bg-red-500/10 text-neutral-500 hover:text-red-600 dark:hover:text-red-400 transition-colors disabled:opacity-30"
-                          title="Archive contest"
-                        >
-                          {busy === contest._id ? <Loader2 size={13} className="animate-spin" /> : <Archive size={13} />}
-                        </button>
                       )}
                     </div>
                   </div>
@@ -468,4 +376,4 @@ const Contests = () => {
   );
 };
 
-export default Contests;
+export default ContestDetails;

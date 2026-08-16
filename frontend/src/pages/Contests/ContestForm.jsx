@@ -19,6 +19,7 @@ import {
   Globe,
   Expand,
   Shrink,
+  ExternalLink,
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import {
@@ -38,6 +39,7 @@ import {
   ChipInput,
   ListItemEditor,
   SectionCard,
+  DateTimePicker,
 } from './contestFormUI';
 
 /* ────────────────────────────────────────────────────────────────────────────
@@ -546,13 +548,15 @@ const ContestForm = () => {
   const toggleSection = (key) =>
     setOpenSections((prev) => ({ ...prev, [key]: !prev[key] }));
 
-  const allOpen = Object.values(openSections).every(Boolean);
+  // All collapsible sections (hackathon section only exists for hackathons)
+  const sectionKeys = ['identity', 'image', 'entry', 'prize', 'audience', 'timeline', 'filterKeys', 'source', 'status', 'detailsLink', 'detailsChoice'];
+  if (form.type === 'hackathon') sectionKeys.push('hackathon');
 
-  const expandAll = () => {
-    const keys = ['identity', 'image', 'entry', 'prize', 'audience', 'timeline', 'filterKeys', 'source', 'status', 'detailsLink', 'detailsChoice'];
-    if (form.type === 'hackathon') keys.push('hackathon');
-    setOpenSections(Object.fromEntries(keys.map((k) => [k, true])));
-  };
+  // allOpen must be checked against the real section list — Object.values({}).every()
+  // is vacuously true, which left the button stuck on "Collapse All" after collapsing.
+  const allOpen = sectionKeys.length > 0 && sectionKeys.every((k) => !!openSections[k]);
+
+  const expandAll = () => setOpenSections(Object.fromEntries(sectionKeys.map((k) => [k, true])));
   const collapseAll = () => setOpenSections({});
 
   const handleCategoryChange = (value) => {
@@ -666,7 +670,7 @@ const ContestForm = () => {
   };
 
   return (
-    <div className="h-full flex flex-col bg-neutral-50/30 dark:bg-[#0d0d0f]/20 selection:bg-neutral-200/50 dark:selection:bg-neutral-800/50">
+    <div className="h-full flex flex-col bg-neutral-50/30 dark:bg-[#0d0d0f]/20 selection:bg-neutral-200/50 dark:selection:bg-neutral-400/40">
       {/* Sticky header */}
       <div className="shrink-0 flex items-center justify-between px-6 py-4 border-b border-neutral-200/50 dark:border-white/5 bg-white/40 dark:bg-[#121214]/40 backdrop-blur-sm">
         <div className="flex items-center gap-3 min-w-0">
@@ -678,13 +682,14 @@ const ContestForm = () => {
             <ArrowLeft size={14} />
           </button>
           <div className="min-w-0">
-            <h1 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-neutral-400 dark:text-neutral-500">
               {isEditing ? 'Edit Contest' : 'Add Contest'}
+            </p>
+            <h1 className="text-base font-semibold text-neutral-900 dark:text-neutral-100 leading-snug mt-1" title={form.title}>
+              {isEditing ? form.title || 'Untitled contest' : 'Create a new contest'}
             </h1>
             <p className="text-[11px] text-neutral-400 dark:text-neutral-500 mt-0.5 truncate">
-              {isEditing
-                ? `Editing: ${form.title || 'untitled'} — pipeline v4.1 schema`
-                : 'Create a contest — same schema as the automation pipeline'}
+              {isEditing ? 'Pipeline v4.1 schema — changes apply to the live page' : 'Same schema as the automation pipeline'}
             </p>
           </div>
         </div>
@@ -776,11 +781,27 @@ const ContestForm = () => {
                   />
                 </Field>
                 <Field label="Official Link">
-                  <TextInput
-                    value={form.link}
-                    onChange={(v) => update('link', v)}
-                    placeholder="https://example.com/contest"
-                  />
+                  <div className="flex gap-2">
+                    <TextInput
+                      value={form.link}
+                      onChange={(v) => update('link', v)}
+                      placeholder="https://example.com/contest"
+                    />
+                    <a
+                      href={form.link || undefined}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={(e) => { if (!form.link) e.preventDefault(); }}
+                      title={form.link ? 'Open official link in new tab' : 'Enter a link above to open it'}
+                      className={`shrink-0 w-9 px-0 py-2 rounded-lg border flex items-center justify-center transition-all shadow-sm ${
+                        form.link
+                          ? 'border-neutral-200/60 dark:border-white/5 bg-white dark:bg-[#18181b] text-neutral-500 hover:text-blue-600 dark:hover:text-blue-400 hover:border-blue-500/30 hover:bg-blue-500/5 cursor-pointer'
+                          : 'border-neutral-200/40 dark:border-white/5 bg-neutral-50 dark:bg-[#151518] text-neutral-300 dark:text-neutral-600 cursor-not-allowed'
+                      }`}
+                    >
+                      <ExternalLink size={13} />
+                    </a>
+                  </div>
                 </Field>
                 <Field
                   label="Description"
@@ -1189,29 +1210,25 @@ const ContestForm = () => {
             >
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <Field label="Start UTC" hint="When the contest opens">
-                  <TextInput
-                    type="datetime-local"
+                  <DateTimePicker
                     value={form.timeline.startUTC}
                     onChange={(v) => update('timeline.startUTC', v)}
                   />
                 </Field>
                 <Field label="Registration Deadline UTC">
-                  <TextInput
-                    type="datetime-local"
+                  <DateTimePicker
                     value={form.timeline.registrationDeadlineUTC}
                     onChange={(v) => update('timeline.registrationDeadlineUTC', v)}
                   />
                 </Field>
                 <Field label="Submission Deadline UTC" required>
-                  <TextInput
-                    type="datetime-local"
+                  <DateTimePicker
                     value={form.timeline.submissionDeadlineUTC}
                     onChange={(v) => update('timeline.submissionDeadlineUTC', v)}
                   />
                 </Field>
                 <Field label="Event End UTC">
-                  <TextInput
-                    type="datetime-local"
+                  <DateTimePicker
                     value={form.timeline.eventEndUTC}
                     onChange={(v) => update('timeline.eventEndUTC', v)}
                   />
@@ -1537,8 +1554,7 @@ const ContestForm = () => {
                   />
                 </Field>
                 <Field label="Trending Until">
-                  <TextInput
-                    type="datetime-local"
+                  <DateTimePicker
                     value={form.trendingUntil}
                     onChange={(v) => update('trendingUntil', v)}
                   />

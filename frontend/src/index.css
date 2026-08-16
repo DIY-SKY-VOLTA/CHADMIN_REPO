@@ -1,5 +1,10 @@
 @import "tailwindcss";
 
+/* Load tailwind.config.js — Tailwind v4 does NOT read it automatically.
+   Without this, every custom shade (neutral-550, red-655, etc.) used across
+   the app is never generated, leaving text/icons with no color. */
+@config "../tailwind.config.js";
+
 @custom-variant dark (&:where(.dark, .dark *));
 
 @theme {
@@ -79,6 +84,12 @@
     --border: 240 3.7% 15.9%;
     --input: 240 3.7% 15.9%;
     --ring: 240 4.9% 83.9%;
+
+    /* Brighter muted text/icons in dark mode: default neutral-400/500 are too
+       dim against the dark card backgrounds (#151518/#18181b), making labels,
+       deadlines, prizes and action icons hard to read. */
+    --color-neutral-400: #b6b6c0;
+    --color-neutral-500: #a1a1aa;
   }
 }
 

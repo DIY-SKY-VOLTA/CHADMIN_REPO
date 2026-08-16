@@ -4,7 +4,6 @@ import {
   ArrowLeft,
   Save,
   Loader2,
-  Sparkles,
   FileText,
   Target,
   Globe,
@@ -252,13 +251,15 @@ const ContestDetailsForm = () => {
   const toggleSection = (key) =>
     setOpenSections((prev) => ({ ...prev, [key]: !prev[key] }));
 
-  const allOpen = Object.values(openSections).every(Boolean);
+  // All collapsible sections (hackathon section only exists for hackathons)
+  const sectionKeys = ['guide', 'fit', 'seo', 'sources'];
+  if (contest?.type === 'hackathon') sectionKeys.push('hackathon');
 
-  const expandAll = () => {
-    const keys = ['guide', 'fit', 'seo', 'sources'];
-    if (contest?.type === 'hackathon') keys.push('hackathon');
-    setOpenSections(Object.fromEntries(keys.map((k) => [k, true])));
-  };
+  // allOpen must be checked against the real section list — Object.values({}).every()
+  // is vacuously true, which left the button stuck on "Collapse All" after collapsing.
+  const allOpen = sectionKeys.length > 0 && sectionKeys.every((k) => !!openSections[k]);
+
+  const expandAll = () => setOpenSections(Object.fromEntries(sectionKeys.map((k) => [k, true])));
   const collapseAll = () => setOpenSections({});
 
   const handleSave = async () => {
@@ -312,7 +313,7 @@ const ContestDetailsForm = () => {
     : 0;
 
   return (
-    <div className="h-full flex flex-col bg-neutral-50/30 dark:bg-[#0d0d0f]/20 selection:bg-neutral-200/50 dark:selection:bg-neutral-800/50">
+    <div className="h-full flex flex-col bg-neutral-50/30 dark:bg-[#0d0d0f]/20 selection:bg-neutral-200/50 dark:selection:bg-neutral-400/40">
       {/* Sticky header */}
       <div className="shrink-0 flex items-center justify-between px-6 py-4 border-b border-neutral-200/50 dark:border-white/5 bg-white/40 dark:bg-[#121214]/40 backdrop-blur-sm">
         <div className="flex items-center gap-3 min-w-0">
@@ -324,15 +325,19 @@ const ContestDetailsForm = () => {
             <ArrowLeft size={14} />
           </button>
           <div className="min-w-0">
-            <h1 className="text-base font-semibold text-neutral-900 dark:text-neutral-100 flex items-center gap-2">
-              <Sparkles size={15} className="text-amber-500" />
-              Detailed Guide
-            </h1>
-            <p className="text-[11px] text-neutral-400 dark:text-neutral-500 mt-0.5 truncate">
-              {contest
-                ? `${contest.title}${existing ? ` — v${existing.version || 1}` : ' — no guide yet'}`
-                : 'AI-POWERED INSIGHTS for the public contest page'}
-            </p>
+            <div className="flex items-baseline gap-3 min-w-0">
+              <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wider text-neutral-400 dark:text-neutral-500">
+                Detailed Guide{existing ? ` · v${existing.version || 1}` : ' · no guide yet'}
+              </span>
+              <h1 className="text-base font-semibold text-neutral-900 dark:text-neutral-100 leading-snug truncate" title={contest?.title}>
+                {contest ? contest.title : 'Contest Guide Editor'}
+              </h1>
+            </div>
+            {contest && (
+              <p className="text-[11px] text-neutral-400 dark:text-neutral-500 mt-0.5 truncate">
+                {[contest.type, contest.category, contest.status].filter(Boolean).join(' · ')}
+              </p>
+            )}
           </div>
         </div>
         <div className="flex items-center gap-2 shrink-0">

@@ -20,6 +20,7 @@ import {
   AlertTriangle,
   Trophy,
   ScrollText,
+  FileText as FileTextIcon,
 } from 'lucide-react';
 
 const sections = [
@@ -42,12 +43,13 @@ const sections = [
   {
     label: 'Management',
     items: [
+      { icon: Trophy, label: 'Contests', path: '/contests', end: true },
+      { icon: FileTextIcon, label: 'Contest Details', path: '/contests/details' },
+      { icon: AlertTriangle, label: 'Contest Images', path: '/contests/images' },
       { icon: Tag, label: 'Categories', path: '/categories' },
+      { icon: Users, label: 'Writers', path: '/users' },
       { icon: ImageIcon, label: 'Media Library', path: '/images' },
       { icon: MessageSquare, label: 'Comments', path: '/comments' },
-      { icon: Trophy, label: 'Contests', path: '/contests', end: true },
-      { icon: AlertTriangle, label: 'Contest Images', path: '/contests/images' },
-      { icon: Users, label: 'Writers', path: '/users' },
     ],
   },
   {

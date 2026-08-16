@@ -25,7 +25,7 @@ router.post('/images/recheck', contestController.recheckImage);
 router.post('/images/bulk-recheck', contestController.bulkRecheck);
 
 // Contest image upload and details
-router.get('/images/details', contestController.getContestDetails);
+router.get('/images/details', contestController.getContestImageDetails);
 router.post('/images/upload', upload.single('image'), contestController.uploadContestImage);
 router.post('/images/upload-url', contestController.uploadContestImageFromUrl);
 router.post('/images/backup', contestController.backupImage);
@@ -34,6 +34,12 @@ router.post('/images/bulk-backup', contestController.bulkBackup);
 // Contest CRUD — admin add / edit / archive
 router.get('/', contestController.listContests);
 router.post('/', contestController.createContest);
+
+// Contests that HAVE a DETAILED GUIDE (contest_details) doc — before /:id so it matches
+router.get('/with-details', contestController.listContestsWithDetails);
+
+// All distinct contest categories (populates the filter dropdown) — before /:id so it matches
+router.get('/categories', contestController.listContestCategories);
 
 // Contest DETAILED GUIDE (contest_details collection) — before /:id so they match
 router.get('/:id/details', contestController.getContestDetails);

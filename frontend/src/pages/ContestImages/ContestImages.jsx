@@ -28,6 +28,7 @@ import {
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'react-hot-toast';
 import adminAPI from '@/api/adminAPI';
+import { copyToClipboard } from '@/utils/clipboard';
 import { uploadContestImageFromUrl } from '@/api/contestAPI';
 
 const FILTER_OPTIONS = [
@@ -398,10 +399,14 @@ const ContestImages = () => {
     if (selectedContestDetails.description) text += `Description: ${selectedContestDetails.description}\n`;
     if (selectedContestDetails.tags?.length > 0) text += `Tags: ${selectedContestDetails.tags.join(', ')}\n`;
 
-    navigator.clipboard.writeText(text).then(() => {
-      setIsCopied(true);
-      setTimeout(() => setIsCopied(false), 2000);
-      toast.success('Context copied to clipboard');
+    copyToClipboard(text).then((ok) => {
+      if (ok) {
+        setIsCopied(true);
+        setTimeout(() => setIsCopied(false), 2000);
+        toast.success('Context copied to clipboard');
+      } else {
+        toast.error('Copy failed — clipboard not available');
+      }
     });
   };
 
@@ -570,7 +575,7 @@ const ContestImages = () => {
   const totalPages = Math.max(1, pagination.pages || 1);
 
   return (
-    <div className="h-full flex flex-col bg-neutral-50/30 dark:bg-[#0d0d0f]/20 selection:bg-neutral-200/50 dark:selection:bg-neutral-800/50">
+    <div className="h-full flex flex-col bg-neutral-50/30 dark:bg-[#0d0d0f]/20 selection:bg-neutral-200/50 dark:selection:bg-neutral-400/40">
       {/* Header */}
       <div className="shrink-0 flex items-center justify-between px-6 py-4 border-b border-neutral-200/50 dark:border-white/5 bg-white/40 dark:bg-[#121214]/40 backdrop-blur-sm">
         <div>

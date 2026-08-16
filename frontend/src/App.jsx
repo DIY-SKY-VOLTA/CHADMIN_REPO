@@ -18,6 +18,7 @@ import ContestImages from './pages/ContestImages/ContestImages';
 import Contests from './pages/Contests/Contests';
 import ContestForm from './pages/Contests/ContestForm';
 import ContestDetailsForm from './pages/Contests/ContestDetailsForm';
+import ContestDetails from './pages/Contests/ContestDetails';
 import Prompts from './pages/Prompts/Prompts';
 
 // Protected Route Component
@@ -102,6 +103,10 @@ function App() {
         <Route 
           path="/contests/images" 
           element={<ProtectedRoute><ContestImages /></ProtectedRoute>} 
+        />
+        <Route 
+          path="/contests/details" 
+          element={<ProtectedRoute><ContestDetails /></ProtectedRoute>} 
         />
         <Route 
           path="/prompts" 

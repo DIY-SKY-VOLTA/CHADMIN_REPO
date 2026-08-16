@@ -865,7 +865,7 @@ exports.bulkBackup = async (req, res) => {
  * Returns contest details (title, description, category, tags, source, link)
  * so the admin can make an informed image externally.
  */
-exports.getContestDetails = async (req, res) => {
+exports.getContestImageDetails = async (req, res) => {
   try {
     const { contestId } = req.query;
 
@@ -1441,6 +1441,102 @@ exports.listContests = async (req, res) => {
     });
   } catch (error) {
     console.error('List contests error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * GET /api/admin/contests/categories
+ * All distinct contest categories in the DB (used to populate the category
+ * filter dropdown — previously it only showed categories from the current page).
+ */
+exports.listContestCategories = async (req, res) => {
+  try {
+    const values = await Contest.distinct('category');
+    const categories = values
+      .filter((c) => typeof c === 'string' && c.trim())
+      .sort((a, b) => a.localeCompare(b));
+    res.json({ success: true, categories });
+  } catch (error) {
+    console.error('List contest categories error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * GET /api/admin/contests/with-details
+ * Admin list of ONLY contests that have a DETAILED GUIDE (contest_details) doc.
+ * Joins each contest with its guide metadata (version, status, quality score,
+ * last updated) so the admin can see at a glance which live pages are covered.
+ */
+exports.listContestsWithDetails = async (req, res) => {
+  try {
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 25));
+    const search = (req.query.search || '').trim();
+    const type = req.query.type || 'all';
+    const status = req.query.status || 'all';
+    const showArchived = req.query.archived === 'true';
+
+    const match = {};
+    if (!showArchived) match.archivedAt = null;
+    if (type && type !== 'all') match.type = type;
+    if (status && status !== 'all') match.status = status;
+    if (search) {
+      match.$or = [
+        { title: { $regex: search, $options: 'i' } },
+        { category: { $regex: search, $options: 'i' } },
+        { slug: { $regex: search, $options: 'i' } },
+        { tags: { $regex: search, $options: 'i' } },
+      ];
+    }
+
+    const [result] = await Contest.aggregate([
+      { $match: match },
+      {
+        $lookup: {
+          from: 'contest_details',
+          localField: '_id',
+          foreignField: 'contestId',
+          as: 'guide',
+        },
+      },
+      // Keep only contests that actually have a details doc
+      { $match: { 'guide.0': { $exists: true } } },
+      {
+        $project: {
+          title: 1,
+          slug: 1,
+          type: 1,
+          category: 1,
+          status: 1,
+          link: 1,
+          image: 1,
+          prize: 1,
+          timeline: 1,
+          archivedAt: 1,
+          createdAt: 1,
+          detail: { $arrayElemAt: ['$guide', 0] },
+        },
+      },
+      { $sort: { 'detail.updatedAt': -1, createdAt: -1 } },
+      {
+        $facet: {
+          total: [{ $count: 'count' }],
+          rows: [{ $skip: (page - 1) * limit }, { $limit: limit }],
+        },
+      },
+    ]);
+
+    const total = result.total.length > 0 ? result.total[0].count : 0;
+
+    res.json({
+      success: true,
+      contests: result.rows || [],
+      pagination: { page, limit, total, pages: Math.max(1, Math.ceil(total / limit)) },
+    });
+  } catch (error) {
+    console.error('List contests with details error:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 };

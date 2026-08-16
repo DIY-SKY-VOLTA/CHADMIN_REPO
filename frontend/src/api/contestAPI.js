@@ -7,6 +7,20 @@ import adminAPI from './adminAPI';
 export const listContests = (params = {}) =>
   adminAPI.get('/contests', { params });
 
+/**
+ * Only contests that have a DETAILED GUIDE (contest_details) doc, joined with
+ * guide metadata (version, status, quality score, last updated).
+ */
+export const listContestsWithDetails = (params = {}) =>
+  adminAPI.get('/contests/with-details', { params });
+
+/**
+ * All distinct contest categories in the DB — populates the category filter
+ * dropdown on the contests list (previously derived only from the current page).
+ */
+export const listContestCategories = () =>
+  adminAPI.get('/contests/categories');
+
 export const getContest = (id) =>
   adminAPI.get(`/contests/${id}`);
 

@@ -19,6 +19,7 @@ import {
   ClipboardCheck,
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
+import { copyToClipboard } from '@/utils/clipboard';
 
 // Vite `?raw` imports — always bundle the exact prompt text from disk
 import contestStructuringTxt from '@/prompts/contest-structuring-v4.1.txt?raw';
@@ -137,12 +138,12 @@ const Prompts = () => {
 
   const handleCopy = async (prompt, e) => {
     e?.stopPropagation();
-    try {
-      await navigator.clipboard.writeText(prompt.text);
+    const ok = await copyToClipboard(prompt.text);
+    if (ok) {
       setCopiedId(prompt.id);
       toast.success(`"${prompt.title}" prompt copied to clipboard`);
       setTimeout(() => setCopiedId(null), 2000);
-    } catch {
+    } else {
       toast.error('Copy failed — clipboard not available');
     }
   };
@@ -151,7 +152,7 @@ const Prompts = () => {
   const totalChars = PROMPTS.reduce((sum, p) => sum + p.chars, 0);
 
   return (
-    <div className="h-full flex flex-col bg-neutral-50/30 dark:bg-[#0d0d0f]/20 selection:bg-neutral-200/50 dark:selection:bg-neutral-800/50">
+    <div className="h-full flex flex-col bg-neutral-50/30 dark:bg-[#0d0d0f]/20 selection:bg-neutral-200/50 dark:selection:bg-neutral-400/40">
       {/* Header */}
       <div className="shrink-0 flex items-center justify-between px-6 py-4 border-b border-neutral-200/50 dark:border-white/5 bg-white/40 dark:bg-[#121214]/40 backdrop-blur-sm">
         <div>

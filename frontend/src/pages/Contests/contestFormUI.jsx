@@ -1,5 +1,6 @@
-import { useState } from 'react';
-import { Plus, X, Trash2, ChevronDown } from 'lucide-react';
+import { useState, useEffect, useRef, useLayoutEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
+import { Plus, X, Trash2, ChevronDown, ChevronLeft, ChevronRight, Calendar, Clock } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'react-hot-toast';
 
@@ -35,6 +36,254 @@ export const TextInput = ({ value, onChange, placeholder, type = 'text', classNa
     className={`${inputCls} ${className || ''}`}
   />
 );
+
+const pad2 = (n) => String(n).padStart(2, '0');
+const todayStr = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+};
+
+/**
+ * Friendly date + time picker. A button field opens a full calendar popover
+ * (month grid, prev/next month nav, today/selected highlighting) with hour +
+ * minute selects — replacing native date/time inputs, which have NO calendar
+ * UI in Firefox and silently reject typed input in Chrome's segmented editor.
+ *
+ * The popover is portaled to <body> so it escapes the SectionCard's
+ * overflow-hidden clip. Value keeps the exact `YYYY-MM-DDTHH:mm` shape, so the
+ * existing UTC conversion helpers round-trip unchanged.
+ */
+export const DateTimePicker = ({ value, onChange, className }) => {
+  const [open, setOpen] = useState(false);
+  const [view, setView] = useState(() => {
+    const d = new Date();
+    return new Date(d.getFullYear(), d.getMonth(), 1);
+  });
+  const [pos, setPos] = useState({ top: 0, left: 0, width: 280 });
+  const triggerRef = useRef(null);
+  const popRef = useRef(null);
+
+  const full = String(value || '');
+  const datePart = full.slice(0, 10);
+  const timePart = full.slice(11, 16);
+  const hasDate = /^\d{4}-\d{2}-\d{2}$/.test(datePart);
+  const [hour, minute] = timePart ? timePart.split(':') : ['00', '00'];
+
+  // Jump the calendar to the value's month (or today) whenever it opens
+  useEffect(() => {
+    if (!open) return;
+    const base = hasDate ? new Date(`${datePart}T00:00:00`) : new Date();
+    setView(new Date(base.getFullYear(), base.getMonth(), 1));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  const reposition = useCallback(() => {
+    const el = triggerRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const popH = popRef.current?.offsetHeight || 340;
+    const width = Math.max(280, Math.min(r.width, 320));
+    const flip = window.innerHeight - r.bottom < popH + 8 && r.top > popH + 8;
+    setPos({
+      top: flip ? Math.max(8, r.top - popH - 6) : r.bottom + 6,
+      left: Math.max(8, Math.min(r.left, window.innerWidth - width - 8)),
+      width,
+    });
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    reposition();
+    const onScroll = () => reposition();
+    const onResize = () => reposition();
+    const onKey = (e) => { if (e.key === 'Escape') setOpen(false); };
+    const onDown = (e) => {
+      if (!popRef.current?.contains(e.target) && !triggerRef.current?.contains(e.target)) setOpen(false);
+    };
+    window.addEventListener('scroll', onScroll, true);
+    window.addEventListener('resize', onResize);
+    window.addEventListener('keydown', onKey);
+    document.addEventListener('mousedown', onDown);
+    return () => {
+      window.removeEventListener('scroll', onScroll, true);
+      window.removeEventListener('resize', onResize);
+      window.removeEventListener('keydown', onKey);
+      document.removeEventListener('mousedown', onDown);
+    };
+  }, [open, reposition]);
+
+  const year = view.getFullYear();
+  const month = view.getMonth();
+  const monthLabel = view.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+  const firstWeekday = new Date(year, month, 1).getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const cells = [];
+  for (let i = 0; i < firstWeekday; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) cells.push(`${year}-${pad2(month + 1)}-${pad2(d)}`);
+  const today = todayStr();
+
+  const displayLabel = () => {
+    if (!hasDate) return 'Pick date & time';
+    const d = new Date(`${datePart}T00:00:00`);
+    const dateLabel = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    if (!timePart) return dateLabel;
+    const t = new Date(`2000-01-01T${timePart}:00`);
+    const timeLabel = t.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+    return `${dateLabel} · ${timeLabel}`;
+  };
+
+  const dayCls = (dayStr) => {
+    const base = 'h-8 w-8 rounded-lg text-[11px] font-medium transition-all flex items-center justify-center mx-auto';
+    if (dayStr === datePart) return `${base} bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 shadow-sm font-bold`;
+    if (dayStr === today) return `${base} text-blue-600 dark:text-blue-400 font-semibold`;
+    return `${base} text-neutral-600 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-white/10`;
+  };
+
+  const pickDay = (dayStr) => onChange(`${dayStr}T${timePart || '00:00'}`);
+  const pickHour = (h) => onChange(`${datePart}T${h}:${minute || '00'}`);
+  const pickMinute = (m) => onChange(`${datePart}T${hour || '00'}:${m}`);
+  const setToday = () => {
+    const d = new Date();
+    const t = timePart || `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+    onChange(`${todayStr()}T${t}`);
+  };
+
+  return (
+    <div className={className}>
+      <button
+        ref={triggerRef}
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className={`${inputCls} flex items-center justify-between gap-2 text-left cursor-pointer ${
+          hasDate ? 'text-neutral-900 dark:text-neutral-100' : 'text-neutral-400 dark:text-neutral-500'
+        }`}
+      >
+        <span className="truncate">{displayLabel()}</span>
+        <Calendar size={13} className="shrink-0 text-neutral-400" />
+      </button>
+
+      {open &&
+        createPortal(
+          <div
+            ref={popRef}
+            className="fixed z-50 bg-white dark:bg-[#18181b] border border-neutral-200/60 dark:border-white/10 rounded-xl shadow-xl shadow-neutral-900/10 dark:shadow-black/40 p-3 space-y-3"
+            style={{ top: pos.top, left: pos.left, width: pos.width }}
+          >
+            {/* Month navigation */}
+            <div className="flex items-center justify-between">
+              <button
+                type="button"
+                onClick={() => setView(new Date(year, month - 1, 1))}
+                className="p-1 rounded-md hover:bg-neutral-100 dark:hover:bg-white/10 text-neutral-500 dark:text-neutral-400 transition-colors"
+                title="Previous month"
+              >
+                <ChevronLeft size={14} />
+              </button>
+              <span className="text-[11px] font-semibold text-neutral-800 dark:text-neutral-100">{monthLabel}</span>
+              <button
+                type="button"
+                onClick={() => setView(new Date(year, month + 1, 1))}
+                className="p-1 rounded-md hover:bg-neutral-100 dark:hover:bg-white/10 text-neutral-500 dark:text-neutral-400 transition-colors"
+                title="Next month"
+              >
+                <ChevronRight size={14} />
+              </button>
+            </div>
+
+            {/* Weekday header */}
+            <div className="grid grid-cols-7 text-center">
+              {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((w, i) => (
+                <span key={i} className="text-[9px] font-semibold text-neutral-400 dark:text-neutral-500 uppercase">
+                  {w}
+                </span>
+              ))}
+            </div>
+
+            {/* Day grid */}
+            <div className="grid grid-cols-7 gap-y-0.5">
+              {cells.map((c, i) =>
+                c ? (
+                  <button key={i} type="button" onClick={() => pickDay(c)} className={dayCls(c)}>
+                    {Number(c.slice(8))}
+                  </button>
+                ) : (
+                  <div key={i} />
+                )
+              )}
+            </div>
+
+            {/* Time */}
+            <div
+              className={`flex items-center gap-1.5 pt-2 border-t border-neutral-200/40 dark:border-white/5 ${
+                hasDate ? '' : 'opacity-50'
+              }`}
+            >
+              <Clock size={12} className="text-neutral-400 shrink-0" />
+              <select
+                value={hour}
+                disabled={!hasDate}
+                onChange={(e) => pickHour(e.target.value)}
+                className="flex-1 min-w-0 bg-white dark:bg-[#151518] border border-neutral-200/60 dark:border-white/10 rounded-md px-1.5 py-1 text-[11px] text-neutral-700 dark:text-neutral-200 focus:outline-none focus:border-neutral-400 dark:focus:border-neutral-700 transition-all"
+              >
+                {Array.from({ length: 24 }, (_, h) => (
+                  <option key={h} value={pad2(h)}>
+                    {pad2(h)}
+                  </option>
+                ))}
+              </select>
+              <span className="text-neutral-400 text-[11px]">:</span>
+              <select
+                value={minute}
+                disabled={!hasDate}
+                onChange={(e) => pickMinute(e.target.value)}
+                className="flex-1 min-w-0 bg-white dark:bg-[#151518] border border-neutral-200/60 dark:border-white/10 rounded-md px-1.5 py-1 text-[11px] text-neutral-700 dark:text-neutral-200 focus:outline-none focus:border-neutral-400 dark:focus:border-neutral-700 transition-all"
+              >
+                {Array.from({ length: 60 }, (_, m) => (
+                  <option key={m} value={pad2(m)}>
+                    {pad2(m)}
+                  </option>
+                ))}
+              </select>
+              <span className="text-[9px] text-neutral-400 dark:text-neutral-500 ml-1 shrink-0">UTC</span>
+            </div>
+
+            {/* Footer */}
+            <div className="flex items-center justify-between pt-1">
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={setToday}
+                  className="px-2 py-1 rounded-md text-[10px] font-semibold text-blue-600 dark:text-blue-400 hover:bg-blue-500/10 transition-colors"
+                >
+                  Today
+                </button>
+                {hasDate && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onChange('');
+                      setOpen(false);
+                    }}
+                    className="px-2 py-1 rounded-md text-[10px] font-semibold text-red-500 hover:bg-red-500/10 transition-colors"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                className="px-2.5 py-1 rounded-md bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 text-[10px] font-semibold hover:opacity-90 transition-all"
+              >
+                Done
+              </button>
+            </div>
+          </div>,
+          document.body
+        )}
+    </div>
+  );
+};
 
 export const TextArea = ({ value, onChange, placeholder, rows = 3, className }) => (
   <textarea
