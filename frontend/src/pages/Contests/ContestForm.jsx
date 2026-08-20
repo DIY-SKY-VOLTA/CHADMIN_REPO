@@ -588,7 +588,6 @@ const ContestForm = () => {
     setLocalFile(file);
     setLocalPreview(URL.createObjectURL(file));
     setImageErr(false);
-    e.target.value = '';
   };
 
   const handleSave = async () => {
