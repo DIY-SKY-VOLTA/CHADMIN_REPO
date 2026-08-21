@@ -21,6 +21,25 @@ export const listContestsWithDetails = (params = {}) =>
 export const listContestCategories = () =>
   adminAPI.get('/contests/categories');
 
+/**
+ * ContestCategory collection management — curated taxonomy driving the public
+ * filter's ordering + active/inactive control. DELETE is a soft archive.
+ */
+export const adminListContestCategories = () =>
+  adminAPI.get('/contest-categories');
+
+export const createContestCategory = (data) =>
+  adminAPI.post('/contest-categories', data);
+
+export const updateContestCategory = (id, data) =>
+  adminAPI.put(`/contest-categories/${id}`, data);
+
+export const archiveContestCategory = (id) =>
+  adminAPI.delete(`/contest-categories/${id}`);
+
+export const reorderContestCategories = (order) =>
+  adminAPI.put('/contest-categories/reorder', { order });
+
 export const getContest = (id) =>
   adminAPI.get(`/contests/${id}`);
 

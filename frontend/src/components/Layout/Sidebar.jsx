@@ -21,6 +21,7 @@ import {
   Trophy,
   ScrollText,
   FileText as FileTextIcon,
+  CalendarDays,
 } from 'lucide-react';
 
 const sections = [
@@ -47,6 +48,9 @@ const sections = [
       { icon: FileTextIcon, label: 'Contest Details', path: '/contests/details' },
       { icon: AlertTriangle, label: 'Contest Images', path: '/contests/images' },
       { icon: Tag, label: 'Categories', path: '/categories' },
+      { icon: Trophy, label: 'Contest Categories', path: '/contest-categories' },
+      { icon: CalendarDays, label: 'Events', path: '/events' },
+      { icon: CalendarDays, label: 'Event Types', path: '/event-types' },
       { icon: Users, label: 'Writers', path: '/users' },
       { icon: ImageIcon, label: 'Media Library', path: '/images' },
       { icon: MessageSquare, label: 'Comments', path: '/comments' },
