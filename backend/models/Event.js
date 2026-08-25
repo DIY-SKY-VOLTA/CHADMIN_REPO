@@ -96,6 +96,32 @@ const venueSchema = new mongoose.Schema(
   { _id: false }
 );
 
+const locationSchema = new mongoose.Schema(
+  {
+    display: { type: String, trim: true, default: null },
+    scope: { type: String, enum: ['city', 'country', 'region', 'worldwide', 'online', 'hybrid', 'multi_location', 'unknown', null], default: null },
+    countries: [{ _id: false, name: { type: String, trim: true }, code: { type: String, trim: true, uppercase: true } }],
+    region: { type: String, trim: true, default: null },
+    city: { type: String, trim: true, default: null },
+    venue: { type: String, trim: true, default: null },
+    coordinates: { type: mongoose.Schema.Types.Mixed, default: null },
+    precision: { type: String, enum: ['venue', 'city', 'country', 'region', 'worldwide', 'online', 'unknown', null], default: null },
+    mapEligible: { type: Boolean, default: false },
+  },
+  { _id: false }
+);
+
+const participationGeographySchema = new mongoose.Schema(
+  {
+    scope: { type: String, enum: ['worldwide', 'countries', 'region', 'unknown', null], default: null },
+    allowedCountries: [{ _id: false, name: { type: String, trim: true }, code: { type: String, trim: true, uppercase: true } }],
+    allowedRegions: [{ type: String, trim: true }],
+    restrictedCountries: [{ _id: false, name: { type: String, trim: true }, code: { type: String, trim: true, uppercase: true } }],
+    eligibilitySummary: { type: String, trim: true, default: null },
+  },
+  { _id: false }
+);
+
 const organizerSchema = new mongoose.Schema(
   {
     name: { type: String, trim: true, default: null },
@@ -238,6 +264,8 @@ const eventSchema = new mongoose.Schema(
     eventDates: eventDatesSchema,
     registration: registrationSchema,
     venue: venueSchema,
+    location: locationSchema,
+    participationGeography: participationGeographySchema,
     organizer: organizerSchema,
     speakers: [{ type: mongoose.Schema.Types.Mixed }],
     agenda: [{ type: mongoose.Schema.Types.Mixed }],
@@ -313,9 +341,26 @@ function deriveEventId(base, year, sourceUrl) {
   return base;
 }
 
-// NOTE: mongoose 9 does not pass a `next` callback to document hooks —
-// promise-style middleware is required here.
 eventSchema.pre('validate', async function () {
+  if (this.location && !this.location.display && this.venue) {
+    const a = this.venue.address;
+    if (a && (a.city || a.country)) {
+      this.location.display = [a.city, a.country].filter(Boolean).join(', ') || a.formatted || this.venue.venueName || null;
+      if (!this.location.city && a.city) this.location.city = a.city;
+      if (!this.location.venue && this.venue.venueName) this.location.venue = this.venue.venueName;
+      if (a.country && (!this.location.countries || this.location.countries.length === 0)) {
+        this.location.countries = [{ name: a.country, code: a.country.length === 2 ? a.country.toUpperCase() : '' }];
+      }
+      if (!this.location.scope) {
+        if (this.venue.mode === 'online') this.location.scope = 'online';
+        else if (a.city) this.location.scope = 'city';
+        else if (a.country) this.location.scope = 'country';
+      }
+    } else if (this.venue.mode === 'online') {
+      if (!this.location.display) this.location.display = 'Online';
+      if (!this.location.scope) this.location.scope = 'online';
+    }
+  }
   if (this.year == null && this.eventDates && this.eventDates.start) {
     const d = new Date(this.eventDates.start);
     if (!isNaN(d.getTime())) this.year = d.getUTCFullYear();
