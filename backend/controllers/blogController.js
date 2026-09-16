@@ -100,6 +100,38 @@ exports.getDashboardStats = async (req, res) => {
 
     const authors = await BlogSubmission.distinct('author.userId');
 
+    // Weekly deltas — "this week vs the 7 days before it" so the dashboard
+    // answers "is this going up or down?", not just lifetime totals.
+    //   pending flow (new submissions) → bucket by createdAt (submitted)
+    //   approved/rejected              → bucket by verificationNotes.verifiedAt (decided)
+    const now = new Date();
+    const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const twoWeeksAgo = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
+
+    const [
+      newSubsThisWeek, newSubsLastWeek,
+      approvedThisWeek, approvedLastWeek,
+      rejectedThisWeek, rejectedLastWeek,
+      newAuthorsAgg,
+    ] = await Promise.all([
+      BlogSubmission.countDocuments({ createdAt: { $gte: weekAgo } }),
+      BlogSubmission.countDocuments({ createdAt: { $gte: twoWeeksAgo, $lt: weekAgo } }),
+      BlogSubmission.countDocuments({ status: 'approved', 'verificationNotes.verifiedAt': { $gte: weekAgo } }),
+      BlogSubmission.countDocuments({ status: 'approved', 'verificationNotes.verifiedAt': { $gte: twoWeeksAgo, $lt: weekAgo } }),
+      BlogSubmission.countDocuments({ status: 'rejected', 'verificationNotes.verifiedAt': { $gte: weekAgo } }),
+      BlogSubmission.countDocuments({ status: 'rejected', 'verificationNotes.verifiedAt': { $gte: twoWeeksAgo, $lt: weekAgo } }),
+      // Authors whose FIRST-ever submission landed in each window
+      BlogSubmission.aggregate([
+        { $group: { _id: '$author.userId', firstSub: { $min: '$createdAt' } } },
+        { $project: { window: {
+          $cond: [{ $gte: ['$firstSub', weekAgo] }, 'thisWeek',
+            { $cond: [{ $gte: ['$firstSub', twoWeeksAgo] }, 'lastWeek', 'older'] }] } } },
+        { $group: { _id: '$window', count: { $sum: 1 } } },
+      ]),
+    ]);
+
+    const byWindow = Object.fromEntries(newAuthorsAgg.map(r => [r._id, r.count]));
+
     res.json({
       success: true,
       stats: {
@@ -108,6 +140,22 @@ exports.getDashboardStats = async (req, res) => {
         rejected,
         authors: authors.length,
         total: pending + approved + rejected,
+        deltas: {
+          // "Needs Review" card tracks incoming submissions — pending is a stock,
+          // the meaningful weekly motion is how many arrived
+          pending: newSubsThisWeek - newSubsLastWeek,
+          approved: approvedThisWeek - approvedLastWeek,
+          rejected: rejectedThisWeek - rejectedLastWeek,
+          newSubsThisWeek,
+          newSubsLastWeek,
+          approvedThisWeek,
+          approvedLastWeek,
+          rejectedThisWeek,
+          rejectedLastWeek,
+          authors: (byWindow.thisWeek || 0) - (byWindow.lastWeek || 0),
+          newAuthorsThisWeek: byWindow.thisWeek || 0,
+          newAuthorsLastWeek: byWindow.lastWeek || 0,
+        },
       }
     });
   } catch (error) {

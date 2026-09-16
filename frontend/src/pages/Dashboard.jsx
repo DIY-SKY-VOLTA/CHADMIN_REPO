@@ -1,15 +1,18 @@
 import { useState, useEffect } from 'react';
-import { 
-  FileText, 
-  CheckCircle, 
-  XCircle, 
+import {
+  FileText,
+  CheckCircle,
+  XCircle,
   Clock,
   Users,
   RefreshCw,
   Calendar,
   Layers,
   ChevronRight,
-  BookOpen
+  BookOpen,
+  TrendingUp,
+  TrendingDown,
+  Minus
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
@@ -94,6 +97,10 @@ const Dashboard = () => {
       bg: 'bg-amber-50 dark:bg-amber-500/10 border-amber-200/40 dark:border-amber-500/20',
       description: 'Submitted posts awaiting editorial audit',
       path: '/editorial',
+      // Pending is a stock — its weekly motion is the flow of NEW submissions
+      delta: stats.deltas?.pending,
+      deltaLabel: 'new this week',
+      deltaTooltip: `${stats.deltas?.newSubsThisWeek ?? 0} new submissions this week vs ${stats.deltas?.newSubsLastWeek ?? 0} the week before`,
     },
     { 
       label: 'Published Posts', 
@@ -103,6 +110,9 @@ const Dashboard = () => {
       bg: 'bg-emerald-50 dark:bg-emerald-500/10 border-emerald-200/40 dark:border-emerald-500/20',
       description: 'Live articles accessible on platform',
       path: '/published',
+      delta: stats.deltas?.approved,
+      deltaLabel: 'this week',
+      deltaTooltip: `${stats.deltas?.approvedThisWeek ?? 0} published this week vs ${stats.deltas?.approvedLastWeek ?? 0} the week before`,
     },
     { 
       label: 'Rejected Reviews', 
@@ -112,6 +122,9 @@ const Dashboard = () => {
       bg: 'bg-red-50 dark:bg-red-500/10 border-red-200/40 dark:border-red-500/20',
       description: 'Submissions flagged or denied approval',
       path: '/editorial',
+      delta: stats.deltas?.rejected,
+      deltaLabel: 'this week',
+      deltaTooltip: `${stats.deltas?.rejectedThisWeek ?? 0} rejected this week vs ${stats.deltas?.rejectedLastWeek ?? 0} the week before`,
     },
     { 
       label: 'Active Authors', 
@@ -121,6 +134,9 @@ const Dashboard = () => {
       bg: 'bg-sky-50 dark:bg-sky-500/10 border-sky-200/40 dark:border-sky-500/20',
       description: 'Registered writers contributing content',
       path: '/users',
+      delta: stats.deltas?.authors,
+      deltaLabel: 'new this week',
+      deltaTooltip: `${stats.deltas?.newAuthorsThisWeek ?? 0} first-time authors this week vs ${stats.deltas?.newAuthorsLastWeek ?? 0} the week before`,
     },
   ] : [];
 
@@ -214,12 +230,34 @@ const Dashboard = () => {
                   </div>
 
                   <div className="mt-4">
-                    <p className="text-3xl font-extrabold tracking-tight font-mono text-neutral-800 dark:text-neutral-100">
-                      {stat.value}
-                    </p>
+                    <div className="flex items-baseline gap-2">
+                      <p className="text-3xl font-extrabold tracking-tight font-mono text-neutral-800 dark:text-neutral-100">
+                        {stat.value}
+                      </p>
+                      {stat.delta !== undefined && stat.delta !== null && Number.isFinite(stat.delta) && (
+                        <span
+                          title={stat.deltaTooltip}
+                          className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-bold font-mono ${
+                            stat.delta > 0
+                              ? 'text-emerald-600 dark:text-emerald-400'
+                              : stat.delta < 0
+                                ? 'text-red-500 dark:text-red-400'
+                                : 'text-neutral-400 dark:text-neutral-500'
+                          }`}
+                        >
+                          {stat.delta > 0 ? <TrendingUp size={9} /> : stat.delta < 0 ? <TrendingDown size={9} /> : <Minus size={9} />}
+                          {stat.delta > 0 ? `+${stat.delta}` : stat.delta}
+                        </span>
+                      )}
+                    </div>
                     <p className="text-[10px] text-neutral-450 dark:text-neutral-500 mt-1">
-                      {stat.description}
+                      {stat.deltaLabel && stat.delta !== undefined && stat.delta !== null && Number.isFinite(stat.delta)
+                        ? `${stat.deltaLabel} · ${stat.description}`
+                        : stat.description}
                     </p>
+                    {stat.deltaTooltip && (
+                      <p className="sr-only">{stat.deltaTooltip}</p>
+                    )}
                   </div>
                 </motion.div>
               ))}
