@@ -55,18 +55,19 @@ const CACHE_TTL = 5 * 60 * 1000;
 function classifyImageStatus(contest) {
   if (!contest) return 'unknown';
   const hasPrimary = !!contest.image?.primary?.url;
-  const hasBackup = !!contest.image?.backup;
+  // image.backup is an OBJECT — a present-but-empty backup is NOT a backup
+  const hasBackup = !!contest.image?.backup?.url;
   const lastStatus = contest.image?.primary?.status;
 
   if (!hasPrimary) return 'no_image';
   if (lastStatus === 'broken' || lastStatus === 'error') return 'broken';
-  if (!lastStatus || lastStatus === 'unknown') return 'unknown';
-  if (!hasBackup && hasPrimary) return 'no_backup';
+  // no_backup is more actionable than unknown — surface it first
+  if (!hasBackup) return 'no_backup';
   if (lastStatus === 'active' || lastStatus === 'healthy') return 'healthy';
   return 'unknown';
 }
 
-function checkImageUrl(imageUrl) {
+function checkImageUrl(imageUrl, timeoutMs = 10000) {
   return new Promise((resolve) => {
     if (!imageUrl) {
       return resolve({ status: 'no_image', statusCode: null, reason: 'No image URL provided' });
@@ -80,7 +81,7 @@ function checkImageUrl(imageUrl) {
         port: parsed.port || (parsed.protocol === 'https:' ? 443 : 80),
         path: parsed.pathname + parsed.search,
         method: 'HEAD',
-        timeout: 10000,
+        timeout: timeoutMs,
         headers: { 'User-Agent': 'Mozilla/5.0 (compatible; ChadminBot/1.0)' },
       };
 
@@ -98,7 +99,7 @@ function checkImageUrl(imageUrl) {
 
       req.on('timeout', () => {
         req.destroy();
-        resolve({ status: 'timeout', statusCode: null, reason: 'Request timed out after 10s' });
+        resolve({ status: 'timeout', statusCode: null, reason: `Request timed out after ${Math.round(timeoutMs / 1000)}s` });
       });
 
       req.on('error', (err) => {
@@ -131,6 +132,7 @@ exports.getImagesHealth = async (req, res) => {
     const filter = req.query.filter || 'all';
     const sortBy = req.query.sortBy || 'title';
     const sortOrder = req.query.sortOrder === 'desc' ? -1 : 1;
+    const verify = req.query.verify === 'true';
 
     const query = {};
     if (search) {
@@ -143,14 +145,40 @@ exports.getImagesHealth = async (req, res) => {
 
     // 1. Fetch all matching items minimally to compute accurate global stats and filter
     const allImages = await Contest.find(query).select('image').lean();
-    
-    const stats = { total: allImages.length, healthy: 0, broken: 0, noBackup: 0, noImage: 0, unknown: 0 };
+
+    // Live verification: DB statuses go stale (URLs rot, scrapers persist 'active').
+    // Re-HEAD the primary URLs (cached) and persist the real status so Broken
+    // reflects reality instead of the last scraper write.
+    if (verify) {
+      const VERIFY_CONCURRENCY = 20;
+      for (let i = 0; i < allImages.length; i += VERIFY_CONCURRENCY) {
+        await Promise.all(allImages.slice(i, i + VERIFY_CONCURRENCY).map(async (c) => {
+          const url = c.image?.primary?.url;
+          if (!url) return;
+          const cached = IMAGE_STATUS_CACHE.get(url);
+          if (cached && (Date.now() - cached.checkedAt) < CACHE_TTL) return;
+          const result = await checkImageUrl(url, 8000);
+          IMAGE_STATUS_CACHE.set(url, { ...result, checkedAt: Date.now() });
+          const dbStatus = result.status === 'alive' ? 'healthy'
+            : result.status === 'dead' ? 'broken' : 'error';
+          await Contest.updateOne(
+            { _id: c._id, 'image.primary.url': url },
+            { $set: { 'image.primary.status': dbStatus, 'image.primary.lastCheckedAt': new Date().toISOString() } }
+          ).catch(() => {}); // sweep must never fail the request
+          c.image.primary.status = dbStatus;
+        }));
+      }
+    }
+
+    // Keys MUST match classifyImageStatus() return values (snake_case) —
+    // camelCase keys here silently produced NaN counts (Broken/No Image = 0).
+    const stats = { total: allImages.length, healthy: 0, broken: 0, no_backup: 0, no_image: 0, unknown: 0 };
     const filteredIds = [];
 
     for (const c of allImages) {
       const status = classifyImageStatus(c);
       if (stats[status] !== undefined) stats[status]++;
-      
+
       if (filter === 'all' || filter === status) {
         filteredIds.push(c._id);
       }
@@ -172,7 +200,9 @@ exports.getImagesHealth = async (req, res) => {
     const pages = Math.max(1, Math.ceil(totalFiltered / limit));
 
     // 2. Fetch only the requested page from the filtered results
-    const sortField = sortBy === 'source' ? 'source.name' : sortBy;
+    const sortField = sortBy === 'source' ? 'source.name'
+      : sortBy === 'lastChecked' ? 'image.primary.lastCheckedAt'
+      : sortBy;
     const contests = await Contest.find({ _id: { $in: filteredIds } })
       .select('title category source link image status')
       .sort({ [sortField]: sortOrder, _id: 1 })
@@ -253,6 +283,10 @@ exports.recheckImage = async (req, res) => {
       success: true,
       check: {
         status: result.status,
+        // Dashboard badge config is keyed by the DB status — return both so the
+        // row/detail panel can render without guessing
+        dbStatus: result.status === 'alive' ? 'healthy'
+          : result.status === 'dead' ? 'broken' : 'error',
         statusCode: result.statusCode,
         reason: result.reason,
       },

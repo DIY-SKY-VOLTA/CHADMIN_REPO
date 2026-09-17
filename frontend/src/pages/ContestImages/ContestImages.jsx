@@ -46,6 +46,7 @@ const STATUS_CONFIG = {
   no_backup: { icon: AlertTriangle, label: 'No Backup', color: '#eab308', bg: 'bg-amber-500/10', text: 'text-amber-600 dark:text-amber-400', border: 'border-amber-500/15' },
   healthy: { icon: CheckCircle2, label: 'Healthy', color: '#22c55e', bg: 'bg-emerald-500/10', text: 'text-emerald-600 dark:text-emerald-400', border: 'border-emerald-500/15' },
   unknown: { icon: HelpCircle, label: 'Unknown', color: '#a1a1aa', bg: 'bg-neutral-500/10', text: 'text-neutral-500', border: 'border-neutral-500/15' },
+  error: { icon: AlertTriangle, label: 'Check Error', color: '#f97316', bg: 'bg-orange-500/10', text: 'text-orange-600 dark:text-orange-400', border: 'border-orange-500/15' },
 };
 
 const REALTIME_STATUS = {
@@ -116,7 +117,7 @@ const ContestImages = () => {
   const [activeFilter, setActiveFilter] = useState('all');
   const [page, setPage] = useState(1);
   const [pagination, setPagination] = useState({ total: 0, pages: 1 });
-  const [stats, setStats] = useState({ total: 0, healthy: 0, broken: 0, noBackup: 0, noImage: 0 });
+  const [stats, setStats] = useState({ total: 0, healthy: 0, broken: 0, no_backup: 0, no_image: 0, unknown: 0 });
   const [sortBy, setSortBy] = useState('title');
   const [sortOrder, setSortOrder] = useState('asc');
 
@@ -198,13 +199,16 @@ const ContestImages = () => {
           filter: activeFilter,
           sortBy,
           sortOrder,
+          // Re-verify primary URLs against the live web so Broken reflects
+          // reality; results are cached server-side so repeat views are fast
+          verify: 'true',
         },
       });
 
       if (res.success) {
         setContests(res.contests || []);
         setPagination(res.pagination || { total: 0, pages: 1 });
-        setStats(res.stats || { total: 0, healthy: 0, broken: 0, noBackup: 0, noImage: 0 });
+        setStats(res.stats || { total: 0, healthy: 0, broken: 0, no_backup: 0, no_image: 0, unknown: 0 });
       }
     } catch (err) {
       toast.error(err?.message || 'Failed to load contest images');
@@ -242,7 +246,7 @@ const ContestImages = () => {
           if (c.id === contest.id) {
             return {
               ...c,
-              imageStatus: res.check.status,
+              imageStatus: res.check.dbStatus,
               image: {
                 ...c.image,
                 lastCheckedAt: new Date().toISOString()
@@ -251,6 +255,17 @@ const ContestImages = () => {
           }
           return c;
         }));
+        // Keep the details slide-over badge in sync when rechecking from it
+        if (selectedContest?.id === contest.id) {
+          setSelectedContest(prev => ({
+            ...prev,
+            imageStatus: res.check.dbStatus,
+            image: {
+              ...prev.image,
+              lastCheckedAt: new Date().toISOString(),
+            },
+          }));
+        }
       }
     } catch (err) {
       toast.error(err?.message || 'Re-check failed');
@@ -580,11 +595,11 @@ const ContestImages = () => {
       <div className="shrink-0 flex items-center justify-between px-6 py-4 border-b border-neutral-200/50 dark:border-white/5 bg-white/40 dark:bg-[#121214]/40 backdrop-blur-sm">
         <div>
           <h1 className="text-base font-semibold text-neutral-900 dark:text-neutral-100 flex items-center gap-2">
-            Contest Images Health
+            Contest Image Health
           </h1>
           <p className="text-[11px] text-neutral-400 dark:text-neutral-500 mt-0.5">
             {stats.total > 0
-              ? `Monitoring ${stats.total} contest images — ${stats.broken} broken, ${stats.noImage} missing`
+              ? `Monitoring ${stats.total} contest images — ${stats.broken} broken, ${stats.no_image} missing`
               : 'Check the health of contest images across all sources'}
           </p>
         </div>
@@ -607,8 +622,8 @@ const ContestImages = () => {
         {[
           { key: 'total', label: 'Total Contests', value: stats.total, icon: Globe, color: 'text-neutral-500', bg: 'bg-neutral-100 dark:bg-neutral-800/50' },
           { key: 'healthy', label: 'Healthy', value: stats.healthy, icon: CheckCircle2, color: 'text-emerald-600 dark:text-emerald-500', bg: 'bg-emerald-500/10' },
-          { key: 'no_image', label: 'No Image', value: stats.noImage, icon: FileWarning, color: 'text-neutral-500', bg: 'bg-neutral-500/10' },
-          { key: 'no_backup', label: 'No Backup', value: stats.noBackup, icon: AlertTriangle, color: 'text-amber-600 dark:text-amber-500', bg: 'bg-amber-500/10' },
+          { key: 'no_image', label: 'No Image', value: stats.no_image, icon: FileWarning, color: 'text-neutral-500', bg: 'bg-neutral-500/10' },
+          { key: 'no_backup', label: 'No Backup', value: stats.no_backup, icon: AlertTriangle, color: 'text-amber-600 dark:text-amber-500', bg: 'bg-amber-500/10' },
           { key: 'broken', label: 'Broken', value: stats.broken, icon: Ban, color: 'text-red-600 dark:text-red-500', bg: 'bg-red-500/10' },
           { key: 'unknown', label: 'Unknown', value: stats.unknown, icon: HelpCircle, color: 'text-neutral-500', bg: 'bg-neutral-500/10' },
         ].map((stat) => (
@@ -1154,6 +1169,10 @@ const ContestImages = () => {
                   {selectedContest.image?.primaryUrl && selectedContest.imageStatus !== 'no_image' ? (
                     <div className="max-h-[180px] w-full flex items-center justify-center relative">
                       <ImagePreview src={selectedContest.image.primaryUrl} size="lg" />
+                    </div>
+                  ) : selectedContest.image?.backupUrl ? (
+                    <div className="max-h-[180px] w-full flex items-center justify-center relative">
+                      <ImagePreview src={selectedContest.image.backupUrl} size="lg" />
                     </div>
                   ) : (
                     <div className="py-10 text-center">
