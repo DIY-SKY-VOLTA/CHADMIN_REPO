@@ -22,9 +22,12 @@ function buildImageVariantUrl({ imageId, variantName, uploadedBy, sha256 }) {
     console.warn('⚠️ Image proxy: BLOG_IMAGE_TOKEN_SECRET/JWT_SECRET not set — image tokens cannot be generated');
     return `/api/uploads/images/${imageId}/variant/${variantName}`;
   }
+  // Tokens expire after 30 days — the proxy verifies with maxAge, so even
+  // already-issued URLs age out instead of working forever if leaked.
   const token = jwt.sign(
     { imageId: String(imageId), variantName, uploadedBy: String(uploadedBy), sha256, purpose: "blog-image-variant" },
-    secret
+    secret,
+    { expiresIn: '30d' }
   );
   return `/api/uploads/images/${imageId}/variant/${variantName}?token=${encodeURIComponent(token)}`;
 }

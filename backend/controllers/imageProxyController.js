@@ -36,7 +36,9 @@ function getSupabaseClient() {
 function verifyToken(token) {
   if (!token) throw new Error("Image token is required");
   const secret = process.env.BLOG_IMAGE_TOKEN_SECRET || process.env.JWT_SECRET;
-  return jwt.verify(token, secret, { ignoreExpiration: true });
+  // maxAge (not just exp checking): also rejects older tokens that were
+  // signed without an expiry, based on their issued-at time.
+  return jwt.verify(token, secret, { maxAge: '30d' });
 }
 
 /**
