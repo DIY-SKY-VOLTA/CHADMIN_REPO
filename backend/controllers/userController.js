@@ -41,15 +41,26 @@ exports.listUsers = async (req, res) => {
       User.countDocuments(query),
     ]);
 
-    // Enrich with writer stats
+    // Enrich with writer stats — tier rules MUST match Phase2
+    // backend/src/modules/blogs/writerTrust.js (shared User collection):
+    //   new 0–1 · verified 2–4 · trusted 5+ · override wins · demoted → new
     let enriched = await Promise.all(users.map(async (u) => {
       const [approved, rejected, pending] = await Promise.all([
         BlogSubmission.countDocuments({ 'author.userId': u._id, status: 'approved' }),
         BlogSubmission.countDocuments({ 'author.userId': u._id, status: 'rejected' }),
         BlogSubmission.countDocuments({ 'author.userId': u._id, status: 'pending' }),
       ]);
-      const tier = approved >= 5 ? 'trusted' : approved >= 1 ? 'verified' : 'new';
-      return { ...u, writerStats: { approved, rejected, pending, tier } };
+      let tier = approved >= 5 ? 'trusted' : approved >= 2 ? 'verified' : 'new';
+      if (u.writerDemoted) tier = 'new';
+      if (u.writerTierOverride) tier = u.writerTierOverride;
+      return {
+        ...u,
+        writerStats: {
+          approved, rejected, pending, tier,
+          demoted: !!u.writerDemoted,
+          override: u.writerTierOverride || null,
+        },
+      };
     }));
 
     // Post-filter for writers role (users with at least one approved blog)
@@ -89,7 +100,10 @@ exports.getUserById = async (req, res) => {
       BlogSubmission.countDocuments({ 'author.userId': user._id, status: 'rejected' }),
       BlogSubmission.countDocuments({ 'author.userId': user._id, status: 'pending' }),
     ]);
-    const tier = approved >= 5 ? 'trusted' : approved >= 1 ? 'verified' : 'new';
+    // Tier rules MUST match Phase2 backend/src/modules/blogs/writerTrust.js
+    let tier = approved >= 5 ? 'trusted' : approved >= 2 ? 'verified' : 'new';
+    if (user.writerDemoted) tier = 'new';
+    if (user.writerTierOverride) tier = user.writerTierOverride;
 
     // Get user's blog submissions
     const submissions = await BlogSubmission.find({ 'author.userId': user._id })
@@ -99,7 +113,66 @@ exports.getUserById = async (req, res) => {
 
     res.json({
       success: true,
-      user: { ...user, writerStats: { approved, rejected, pending, tier }, submissions },
+      user: {
+        ...user,
+        writerStats: {
+          approved, rejected, pending, tier,
+          demoted: !!user.writerDemoted,
+          override: user.writerTierOverride || null,
+        },
+        submissions,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * PUT /users/:id/writer-tier
+ * Manual trust-tier override for a writer. Persists to the shared User
+ * collection; Phase2's writerTrust engine reads it on every submission.
+ *  - tier: 'new' | 'verified' | 'trusted' — forces that tier
+ *  - tier: '' (empty)  — clears the override, back to automatic
+ *  - clearDemotion: true — also clears a rejection-based demotion flag
+ */
+exports.setWriterTier = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { tier, clearDemotion } = req.body;
+
+    const VALID = ['new', 'verified', 'trusted', ''];
+    if (!VALID.includes(tier)) {
+      return res.status(400).json({ success: false, message: 'tier must be new, verified, trusted, or empty to clear' });
+    }
+
+    const user = await User.findById(id);
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+    if (user.isAdmin) {
+      return res.status(400).json({ success: false, message: 'Admins do not have writer tiers' });
+    }
+
+    user.writerTierOverride = tier;
+    if (clearDemotion) user.writerDemoted = false;
+    await user.save();
+
+    logAction({
+      adminId: req.admin.id,
+      adminName: req.admin.username || req.admin.id,
+      action: 'set_writer_tier',
+      description: `Set writer tier override for "${user.username}" to ${tier === '' ? 'automatic' : tier}${clearDemotion ? ' (demotion cleared)' : ''}`,
+      targetId: id,
+      targetType: 'user',
+      metadata: { tier, clearDemotion: !!clearDemotion },
+    });
+
+    res.json({
+      success: true,
+      message: tier === ''
+        ? `Override cleared — ${user.username} is back on the automatic tier`
+        : `Tier override set: ${user.username} → ${tier}`,
+      writerTierOverride: user.writerTierOverride,
+      writerDemoted: user.writerDemoted,
     });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -175,14 +248,25 @@ exports.getWriterStats = async (req, res) => {
     const { userId } = req.params;
     if (!userId) return res.status(400).json({ success: false, message: 'User ID required' });
 
-    const [approved, rejected, pending] = await Promise.all([
+    const [user, approved, rejected, pending] = await Promise.all([
+      User.findById(userId).select('writerTierOverride writerDemoted').lean(),
       BlogSubmission.countDocuments({ 'author.userId': userId, status: 'approved' }),
       BlogSubmission.countDocuments({ 'author.userId': userId, status: 'rejected' }),
       BlogSubmission.countDocuments({ 'author.userId': userId, status: 'pending' }),
     ]);
-    const tier = approved >= 5 ? 'trusted' : approved >= 1 ? 'verified' : 'new';
+    // Tier rules MUST match Phase2 backend/src/modules/blogs/writerTrust.js
+    let tier = approved >= 5 ? 'trusted' : approved >= 2 ? 'verified' : 'new';
+    if (user?.writerDemoted) tier = 'new';
+    if (user?.writerTierOverride) tier = user.writerTierOverride;
 
-    res.json({ success: true, writerStats: { approved, rejected, pending, tier } });
+    res.json({
+      success: true,
+      writerStats: {
+        approved, rejected, pending, tier,
+        demoted: !!user?.writerDemoted,
+        override: user?.writerTierOverride || null,
+      },
+    });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }

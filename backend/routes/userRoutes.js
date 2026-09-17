@@ -9,5 +9,6 @@ router.get('/', userController.listUsers);
 router.get('/:id', userController.getUserById);
 router.post('/:id/toggle-admin', userController.toggleAdminStatus);
 router.post('/:id/toggle-verified', userController.toggleVerifiedStatus);
+router.put('/:id/writer-tier', userController.setWriterTier);
 // Writer stats are returned inline in listUsers and getUserById
 module.exports = router;

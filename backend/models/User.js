@@ -64,6 +64,19 @@ const userSchema = new mongoose.Schema({
     default: false,
     description: "Whether user can verify and publish blog submissions"
   },
+  // ── Writer trust system (written here, read by Phase2 writer backend) ──
+  // Manual tier override — wins over the computed tier when set.
+  writerTierOverride: {
+    type: String,
+    enum: ['new', 'verified', 'trusted', ''],
+    default: '',
+  },
+  // Set when a writer is demoted (e.g. repeated rejections). Their posts go
+  // to review regardless of tier until cleared.
+  writerDemoted: {
+    type: Boolean,
+    default: false,
+  },
   verificationToken: String,
   verificationTokenExpires: Date,
   emailSendFailed: {

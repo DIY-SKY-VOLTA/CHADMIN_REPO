@@ -25,9 +25,22 @@ import { toast } from 'react-hot-toast';
 import adminAPI from '@/api/adminAPI';
 
 const tierConfig = {
-  new:      { label: 'New Writer',      color: 'text-neutral-500 dark:text-neutral-400 bg-neutral-100 dark:bg-white/5 border-neutral-250 dark:border-white/5' },
-  verified: { label: 'Verified Writer', color: 'text-blue-600 dark:text-blue-400 bg-blue-500/10 border-blue-500/10' },
-  trusted:  { label: 'Trusted Writer',  color: 'text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border-emerald-500/10' },
+  new:      { label: 'New Writer',      color: 'text-neutral-500 dark:text-neutral-400 bg-neutral-100 dark:bg-white/5 border-neutral-250 dark:border-white/5', hint: 'Every post goes to the review queue' },
+  verified: { label: 'Verified Writer', color: 'text-blue-600 dark:text-blue-400 bg-blue-500/10 border-blue-500/10', hint: 'Auto-publishes · 25% spot-checked' },
+  trusted:  { label: 'Trusted Writer',  color: 'text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border-emerald-500/10', hint: 'Auto-publishes, no spot-checks' },
+};
+
+// Tier behavior explainer shown under the tier pill
+const TierPill = ({ tier }) => {
+  const cfg = tierConfig[tier] || tierConfig.new;
+  return (
+    <span
+      className={`px-2 py-0.5 rounded text-[8px] font-bold border cursor-help ${cfg.color}`}
+      title={cfg.hint}
+    >
+      {cfg.label}
+    </span>
+  );
 };
 
 export default function UsersPage() {
@@ -71,6 +84,36 @@ export default function UsersPage() {
   const handleResetSearch = () => {
     setSearch('');
     setPage(1);
+  };
+
+  // Manual trust-tier override — '' clears back to automatic. Mirrors the
+  // backend: override wins, clearDemotion also lifts a rejection demotion.
+  const handleSetTier = async (userId, tier, clearDemotion = false) => {
+    setIsActionLoading(true);
+    try {
+      const res = await adminAPI.put(`/users/${userId}/writer-tier`, { tier, clearDemotion });
+      if (res.success) {
+        toast.success(res.message);
+        setUsers(prev => prev.map(u => u._id === userId ? {
+          ...u,
+          writerTierOverride: tier,
+          writerDemoted: clearDemotion ? false : u.writerDemoted,
+        } : u));
+        if (selectedUser?._id === userId) {
+          setSelectedUser(prev => ({
+            ...prev,
+            writerTierOverride: tier,
+            writerDemoted: clearDemotion ? false : prev.writerDemoted,
+          }));
+          // Re-pull so the effective tier reflects the new override
+          openUserDetail(prevUser => prevUser);
+        }
+      }
+    } catch {
+      toast.error('Failed to set writer tier');
+    } finally {
+      setIsActionLoading(false);
+    }
   };
 
   const handleToggleAdmin = async (userId) => {
@@ -143,7 +186,7 @@ export default function UsersPage() {
       <div className="shrink-0 flex items-center justify-between px-6 py-4 border-b border-neutral-200/50 dark:border-white/5 bg-white/40 dark:bg-[#121214]/40 backdrop-blur-sm">
         <div>
           <h1 className="text-base font-semibold text-neutral-900 dark:text-neutral-100 flex items-center gap-2">
-            User Directory
+            Writers & Admins
           </h1>
           <p className="text-[11px] text-neutral-400 dark:text-neutral-500 mt-0.5">
             {pagination ? `Showing ${users.length} of ${pagination.total} registered users` : 'Manage platform users, roles, and writers'}
@@ -512,9 +555,62 @@ export default function UsersPage() {
                     <div className="bg-neutral-50/50 dark:bg-[#1b1b1e]/30 border border-neutral-200/30 dark:border-white/5 rounded-xl p-3 space-y-3">
                       <div className="flex justify-between items-center">
                         <span className="text-[10px] text-neutral-500">Tier Status:</span>
-                        <span className={`px-2 py-0.5 rounded text-[8px] font-bold border ${tierConfig[selectedUser.writerStats.tier]?.color || 'text-neutral-400 bg-neutral-150'}`}>
-                          {tierConfig[selectedUser.writerStats.tier]?.label || 'New'}
+                        <span className="flex items-center gap-1.5">
+                          {selectedUser.writerStats.demoted && (
+                            <span className="px-2 py-0.5 rounded text-[8px] font-bold border text-red-600 dark:text-red-400 bg-red-500/10 border-red-500/10" title="Demoted after repeated rejections — all posts go to review">
+                              Demoted
+                            </span>
+                          )}
+                          {selectedUser.writerStats.override && (
+                            <span className="px-2 py-0.5 rounded text-[8px] font-bold border text-purple-600 dark:text-purple-400 bg-purple-500/10 border-purple-500/10" title="Tier manually set by an admin — wins over the automatic calculation">
+                              Override
+                            </span>
+                          )}
+                          <TierPill tier={selectedUser.writerStats.tier} />
                         </span>
+                      </div>
+
+                      {/* Manual tier override control */}
+                      <div className="flex items-center justify-between gap-2 pt-1 border-t border-neutral-200/40 dark:border-white/5">
+                        <span className="text-[9px] text-neutral-400 uppercase tracking-wider font-semibold">Admin Override</span>
+                        <div className="flex items-center gap-1">
+                          {[['new', 'New'], ['verified', 'Verified'], ['trusted', 'Trusted'], ['', 'Auto']].map(([val, label]) => {
+                            const active = (selectedUser.writerStats.override || '') === (val || '')
+                              && (val !== '' || selectedUser.writerStats.override === null || selectedUser.writerStats.override === '');
+                            const isAuto = val === '';
+                            return (
+                              <button
+                                key={label}
+                                type="button"
+                                disabled={isActionLoading || !!selectedUser.isAdmin}
+                                onClick={() => handleSetTier(selectedUser._id, val, false)}
+                                title={
+                                  isAuto
+                                    ? 'Clear override — tier computed automatically from approved/rejected history'
+                                    : `Force tier: ${tierConfig[val]?.hint}`
+                                }
+                                className={`px-2 py-1 rounded-md text-[9px] font-semibold border transition-all disabled:opacity-40 ${
+                                  active
+                                    ? 'bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 border-neutral-900 dark:border-white shadow-sm'
+                                    : 'bg-white dark:bg-[#151518] text-neutral-500 dark:text-neutral-400 border-neutral-200/60 dark:border-white/10 hover:border-neutral-400 dark:hover:border-neutral-600'
+                                }`}
+                              >
+                                {label}
+                              </button>
+                            );
+                          })}
+                          {selectedUser.writerStats.demoted && (
+                            <button
+                              type="button"
+                              disabled={isActionLoading}
+                              onClick={() => handleSetTier(selectedUser._id, '', true)}
+                              className="px-2 py-1 rounded-md text-[9px] font-semibold border bg-white dark:bg-[#151518] text-red-500 hover:text-red-600 dark:hover:text-red-400 border-neutral-200/60 dark:border-white/10 hover:border-red-400 transition-all disabled:opacity-40"
+                              title="Clear the rejection demotion — writer returns to the automatic tier"
+                            >
+                              Clear Demotion
+                            </button>
+                          )}
+                        </div>
                       </div>
                       <div className="grid grid-cols-3 gap-2 mt-1">
                         <div className="text-center p-1.5 bg-white dark:bg-[#151518] border border-neutral-200/50 dark:border-white/5 rounded-lg shadow-sm">
