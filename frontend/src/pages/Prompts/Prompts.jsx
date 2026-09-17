@@ -22,40 +22,40 @@ import { toast } from 'react-hot-toast';
 import { copyToClipboard } from '@/utils/clipboard';
 
 // Vite `?raw` imports — always bundle the exact prompt text from disk
-import contestStructuringTxt from '@/prompts/contest-structuring-v4.1.txt?raw';
-import contestBackfillTxt from '@/prompts/contest-backfill-v3.2.txt?raw';
-import contestDetailsTxt from '@/prompts/contest-details-v1.0.txt?raw';
-import hackathonStructuringTxt from '@/prompts/hackathon-structuring-v1.1.txt?raw';
-import hackathonDetailsTxt from '@/prompts/hackathon-details-v3.0.txt?raw';
-import eventStructuringTxt from '@/prompts/event-structuring-v1.1.txt?raw';
-import eventDetailsTxt from '@/prompts/event-details-v1.0.txt?raw';
-import validationTxt from '@/prompts/validation-v1.0.txt?raw';
+import contestStructuringTxt from '@/prompts/contest-structuring-v4.3-upgraded.txt?raw';
+import contestBackfillTxt from '@/prompts/contest-backfill-v4.0.txt?raw';
+import contestDetailsTxt from '@/prompts/contest-details-v1.1-upgraded.txt?raw';
+import hackathonStructuringTxt from '@/prompts/hackathon-structuring-v2.0-upgraded.txt?raw';
+import hackathonDetailsTxt from '@/prompts/hackathon-details-v4.0-upgraded.txt?raw';
+import eventStructuringTxt from '@/prompts/event-structuring-v3.0-upgraded.txt?raw';
+import eventDetailsTxt from '@/prompts/event-details-v3.0-upgraded.txt?raw';
+import validationTxt from '@/prompts/validation-v2.0-upgraded.txt?raw';
 
 const PROMPTS = [
   {
     id: 'contest-structuring',
     title: 'Contest Structuring',
-    version: 'v4.1',
+    version: 'v4.3',
     icon: FileText,
     accent: 'text-blue-600 dark:text-blue-400 bg-blue-500/10 border-blue-500/15',
     description:
-      'Main pipeline prompt — raw scraped contest data + URL context → one normalized contest document for the Contests collection.',
+      'Main pipeline prompt — raw scraped contest data + URL context + web search → one verified, normalized contest document with location intelligence for the Contests collection.',
     text: contestStructuringTxt,
   },
   {
     id: 'contest-backfill',
     title: 'Contest Backfill',
-    version: 'v3.2',
+    version: 'v4.0',
     icon: RefreshCw,
     accent: 'text-amber-600 dark:text-amber-400 bg-amber-500/10 border-amber-500/15',
     description:
-      'Computed-field backfill for existing contests: description, prizeSummary, feeConfidence, eligibilityLabel, primarySkillLevel. Outputs a JSON diff/patch, not a full doc.',
+      'Computed-field + location backfill for existing contests: description, prizeSummary, feeConfidence, eligibilityLabel, primarySkillLevel, structured location & participationGeography migration. Outputs a JSON diff/patch, not a full doc.',
     text: contestBackfillTxt,
   },
   {
     id: 'contest-details',
     title: 'Contest Details',
-    version: 'v1.0',
+    version: 'v1.1',
     icon: Sparkles,
     accent: 'text-violet-600 dark:text-violet-400 bg-violet-500/10 border-violet-500/15',
     description:
@@ -65,17 +65,17 @@ const PROMPTS = [
   {
     id: 'hackathon-structuring',
     title: 'Hackathon Structuring',
-    version: 'v1.1',
+    version: 'v2.0',
     icon: Cpu,
     accent: 'text-purple-600 dark:text-purple-400 bg-purple-500/10 border-purple-500/15',
     description:
-      'Structured hackathon data (tracks, judging, resources) from raw webpage content using AI web search + URL grounding. Outputs to Contests (type: hackathon) + contest_details.',
+      'Structured hackathon data (tracks, judging, resources) with verified evidence + conflict resolution from raw webpage content using AI web search + URL grounding. Outputs to Contests (type: hackathon) + contest_details.',
     text: hackathonStructuringTxt,
   },
   {
     id: 'hackathon-details',
     title: 'Hackathon Details',
-    version: 'v3.0',
+    version: 'v4.0',
     icon: ClipboardCheck,
     accent: 'text-pink-600 dark:text-pink-400 bg-pink-500/10 border-pink-500/15',
     description:
@@ -85,31 +85,31 @@ const PROMPTS = [
   {
     id: 'event-structuring',
     title: 'Event Structuring',
-    version: 'v1.1',
+    version: 'v3.0',
     icon: Calendar,
     accent: 'text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border-emerald-500/15',
     description:
-      'Strict event/conference extraction — speakers, agenda, ticket tiers & venue from subpages. One normalized event document per the Events schema.',
+      'Strict event/conference extraction — tagged entities, multi-venue readiness, tiered pricing & venue from subpages with mandatory research + conflict resolution. One normalized event document per the Events schema.',
     text: eventStructuringTxt,
   },
   {
     id: 'event-details',
     title: 'Event Details',
-    version: 'v1.0',
+    version: 'v3.0',
     icon: FileCode,
     accent: 'text-teal-600 dark:text-teal-400 bg-teal-500/10 border-teal-500/15',
     description:
-      'Event Intelligence writer — hero, why attend, speakers & agenda highlights, FAQ, tips and SEO meta for event detail pages. Pinned to the exact edition.',
+      'Event Intelligence writer — hero, why attend, speakers & agenda highlights, FAQ, tips and SEO meta for event detail pages. Reads tagged entities and feeState pricing; pinned to the exact edition.',
     text: eventDetailsTxt,
   },
   {
     id: 'validation',
     title: 'Data Validation',
-    version: 'v1.0',
+    version: 'v2.0',
     icon: ShieldCheck,
     accent: 'text-rose-600 dark:text-rose-400 bg-rose-500/10 border-rose-500/15',
     description:
-      'Pre-pipeline QA — validates scraped contest records against live source pages via web search and flags discrepancies before normalization.',
+      'Pre-pipeline QA (aligned to structuring v4.3) — validates scraped contest records against official source pages via web search, resolves false conflicts and flags discrepancies before normalization.',
     text: validationTxt,
   },
 ].map((p) => ({
