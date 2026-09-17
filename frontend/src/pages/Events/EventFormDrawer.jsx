@@ -16,6 +16,7 @@ import {
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'react-hot-toast';
 import { createEvent, updateEvent } from '@/api/eventAPI';
+import { useNestedForm } from '@/hooks/useNestedForm';
 
 const inputCls =
   'w-full px-3 py-2 bg-white dark:bg-[#1b1b1e] border border-neutral-200/60 dark:border-white/5 rounded-lg text-xs text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 focus:outline-none focus:border-neutral-400 dark:focus:border-[#2b2b30] transition-all shadow-sm';
@@ -274,7 +275,10 @@ function ToggleRow({ label, desc, checked, onChange }) {
 }
 
 export default function EventFormDrawer({ isOpen, isCreating, eventData, eventTypes, onClose, onSaved }) {
-  const [form, setForm] = useState(blankForm());
+  // Shared form-state hook (same mechanism as the contest forms) — keys are
+  // flat today, but nested dot-paths (e.g. 'address.city') work if the form
+  // grows, and the whole form hydrates via the exposed setForm.
+  const { form, setForm, update } = useNestedForm(blankForm);
   const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
@@ -293,7 +297,7 @@ export default function EventFormDrawer({ isOpen, isCreating, eventData, eventTy
     return opts;
   }, [eventTypes, form.eventType]);
 
-  const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }));
+  const set = (key) => (e) => update(key, e.target.value);
   const toggle = (key) => () => setForm((f) => ({ ...f, [key]: !f[key] }));
 
   const handleSave = async () => {

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { useNestedForm } from '@/hooks/useNestedForm';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -191,7 +192,9 @@ const ContestDetailsForm = () => {
   const navigate = useNavigate();
   const { id } = useParams();
 
-  const [form, setForm] = useState(createEmptyForm);
+  // Shared hook — replaces the copy-pasted update() that hid the read-only
+  // fields bug. See hooks/useNestedForm.js.
+  const { form, setForm, update } = useNestedForm(createEmptyForm);
   const [contest, setContest] = useState(null);
   const [existing, setExisting] = useState(null);
   const [openSections, setOpenSections] = useState({ guide: true });
@@ -232,21 +235,6 @@ const ContestDetailsForm = () => {
       cancelled = true;
     };
   }, [id, navigate]);
-
-  const update = (path, value) => {
-    setForm((prev) => {
-      const next = { ...prev };
-      const keys = path.split('.');
-      let ref = next;
-      for (let i = 0; i < keys.length - 1; i++) {
-        const k = keys[i];
-        if (ref[k] === null || ref[k] === undefined || typeof ref[k] !== 'object') ref[k] = {};
-        ref[k] = { ...ref[k] };
-      }
-      ref[keys[keys.length - 1]] = value;
-      return next;
-    });
-  };
 
   const toggleSection = (key) =>
     setOpenSections((prev) => ({ ...prev, [key]: !prev[key] }));

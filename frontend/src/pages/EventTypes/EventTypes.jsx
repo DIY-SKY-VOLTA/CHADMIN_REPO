@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useNestedForm } from '@/hooks/useNestedForm';
 import {
   CalendarDays,
   Plus,
@@ -27,7 +28,8 @@ export default function EventTypesPage() {
   // Form & Drawer states
   const [editingId, setEditingId] = useState(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
-  const [editForm, setEditForm] = useState({ name: '', description: '', color: '#3b82f6', isActive: true });
+  // Shared form hook (contest forms + events drawer) — flat keys today, dot-path safe if the form grows
+  const { form: editForm, setForm: setEditForm } = useNestedForm({ name: '', description: '', color: '#3b82f6', isActive: true });
   const [isCreating, setIsCreating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 

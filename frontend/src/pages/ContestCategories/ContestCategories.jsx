@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useNestedForm } from '@/hooks/useNestedForm';
 import {
   Trophy,
   Plus,
@@ -32,7 +33,8 @@ export default function ContestCategoriesPage() {
   // Form & Drawer states
   const [editingId, setEditingId] = useState(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
-  const [editForm, setEditForm] = useState({ name: '', description: '', color: '#78716c', isActive: true });
+  // Shared form hook (contest forms + events drawer) — flat keys today, dot-path safe if the form grows
+  const { form: editForm, setForm: setEditForm } = useNestedForm({ name: '', description: '', color: '#78716c', isActive: true });
   const [isCreating, setIsCreating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 

@@ -28,6 +28,7 @@ import {
   updateContest,
   uploadContestImage,
 } from '@/api/contestAPI';
+import { useNestedForm } from '@/hooks/useNestedForm';
 import {
   inputCls,
   Field,
@@ -486,7 +487,9 @@ const ContestForm = () => {
   const { id } = useParams();
   const isEditing = !!id;
 
-  const [form, setForm] = useState(createEmptyForm);
+  // Shared hook — same dot-path update() both contest forms previously
+  // copy-pasted (and one copy of which was broken). See hooks/useNestedForm.js.
+  const { form, setForm, update } = useNestedForm(createEmptyForm);
   const [openSections, setOpenSections] = useState({ identity: true });
   const [isLoading, setIsLoading] = useState(isEditing);
   const [isSaving, setIsSaving] = useState(false);
@@ -529,21 +532,6 @@ const ContestForm = () => {
       cancelled = true;
     };
   }, [isEditing, id, navigate]);
-
-  const update = (path, value) => {
-    setForm((prev) => {
-      const next = { ...prev };
-      const keys = path.split('.');
-      let ref = next;
-      for (let i = 0; i < keys.length - 1; i++) {
-        const k = keys[i];
-        if (ref[k] === null || ref[k] === undefined || typeof ref[k] !== 'object') ref[k] = {};
-        ref[k] = { ...ref[k] };
-      }
-      ref[keys[keys.length - 1]] = value;
-      return next;
-    });
-  };
 
   const toggleSection = (key) =>
     setOpenSections((prev) => ({ ...prev, [key]: !prev[key] }));
