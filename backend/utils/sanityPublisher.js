@@ -371,7 +371,10 @@ function autoGenerateExcerpt(content, maxLength = 200) {
 async function getAllSanityPosts() {
   if (!SANITY_TOKEN) return [];
   try {
-    const posts = await sanityClient.fetch(`*[_type == "post"] | order(_createdAt desc) {
+    // Exclude Sanity drafts: unpublished docs live under the `drafts.` path.
+    // Without this filter, Studio drafts leaked into the admin Published list
+    // and were rendered with the LIVE badge.
+    const posts = await sanityClient.fetch(`*[_type == "post" && !(_id in path("drafts.**"))] | order(_createdAt desc) {
       _id,
       title,
       "slug": slug.current,
