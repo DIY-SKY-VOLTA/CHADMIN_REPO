@@ -13,6 +13,7 @@ import CategoriesPage from './pages/Categories/Categories';
 import ContestCategoriesPage from './pages/ContestCategories/ContestCategories';
 import EventTypesPage from './pages/EventTypes/EventTypes';
 import EventsPage from './pages/Events/Events';
+import ReviewQueuePage from './pages/Events/ReviewQueue';
 import PublishedPage from './pages/Published/Published';
 import AnalyticsPage from './pages/Analytics/Analytics';
 import ActivityLog from './pages/ActivityLog/ActivityLog';
@@ -90,6 +91,10 @@ function App() {
         <Route 
           path="/events" 
           element={<ProtectedRoute><EventsPage /></ProtectedRoute>} 
+        />
+        <Route 
+          path="/events/review-queue" 
+          element={<ProtectedRoute><ReviewQueuePage /></ProtectedRoute>} 
         />
         <Route 
           path="/published" 
