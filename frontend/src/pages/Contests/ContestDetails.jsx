@@ -125,7 +125,7 @@ const ContestDetails = () => {
         <div>
           <h1 className="text-base font-semibold text-neutral-900 dark:text-neutral-100 flex items-center gap-2">
             <FileText size={16} strokeWidth={1.5} className="text-amber-500" />
-            Contest Details
+            Contest Guides
           </h1>
           <p className="text-[11px] text-neutral-400 dark:text-neutral-500 mt-0.5">
             {pagination.total > 0

@@ -434,7 +434,7 @@ const Dashboard = () => {
                       </div>
                       <div>
                         <h4 className="text-xs font-bold text-neutral-855 dark:text-neutral-200 group-hover:text-neutral-950 dark:group-hover:text-white transition-colors">
-                          Category Manager
+                          Post Category Manager
                         </h4>
                         <p className="text-[9px] text-neutral-450 dark:text-neutral-500 mt-0.5">
                           Configure article classification scopes
