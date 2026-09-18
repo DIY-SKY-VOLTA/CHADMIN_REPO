@@ -35,6 +35,12 @@ const activityLogSchema = new mongoose.Schema({
       "change_password",
       "update_profile",
       "login",
+      // User moderation & trust (userController)
+      "set_writer_tier",
+      "set_account_status",
+      "delete_user",
+      "logout_all_sessions",
+      "bulk_user_action",
     ],
     index: true,
   },

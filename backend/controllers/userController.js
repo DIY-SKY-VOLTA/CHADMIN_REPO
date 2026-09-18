@@ -1,6 +1,7 @@
 const User = require('../models/User');
 const BlogSubmission = require('../models/BlogSubmission');
 const Comment = require('../models/Comment');
+const ActivityLog = require('../models/ActivityLog');
 const { logAction } = require('./activityLogController');
 
 exports.listUsers = async (req, res) => {
@@ -107,11 +108,28 @@ exports.getUserById = async (req, res) => {
     if (user.writerDemoted) tier = 'new';
     if (user.writerTierOverride) tier = user.writerTierOverride;
 
-    // Get user's blog submissions
-    const submissions = await BlogSubmission.find({ 'author.userId': user._id })
-      .sort({ createdAt: -1 })
-      .limit(20)
-      .lean();
+    // Get user's blog submissions + admin activity touching this user + live sessions
+    const [submissions, activity, sessionDoc] = await Promise.all([
+      BlogSubmission.find({ 'author.userId': user._id })
+        .sort({ createdAt: -1 })
+        .limit(20)
+        .lean(),
+      ActivityLog.find({ targetId: String(user._id), targetType: 'user' })
+        .sort({ createdAt: -1 })
+        .limit(15)
+        .select('adminName action description createdAt')
+        .lean(),
+      // refreshTokens are stripped from the main select — pull separately.
+      User.findById(user._id).select('refreshTokens').lean(),
+    ]);
+
+    // Active session count from live refresh tokens (what "log out everywhere"
+    // would revoke). Only the device label + age is shown — never token hashes.
+    const sessions = (sessionDoc?.refreshTokens || []).map(t => ({
+      device: t.device || 'Unknown device',
+      lastUsedAt: t.lastUsedAt || null,
+      expiresAt: t.expiresAt || null,
+    }));
 
     res.json({
       success: true,
@@ -123,6 +141,8 @@ exports.getUserById = async (req, res) => {
           override: user.writerTierOverride || null,
         },
         submissions,
+        activity,
+        sessions,
       },
     });
   } catch (error) {
@@ -384,6 +404,157 @@ exports.deleteUser = async (req, res) => {
     res.json({
       success: true,
       message: `${user.username} deleted. Their ${submissions} blog submission(s) and ${comments} comment(s) remain for the record.`,
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * POST /users/:id/logout-all
+ * Kick every active session for a user by revoking all refresh tokens.
+ * Their current JWT dies within ≤15 minutes (access-token lifetime), so
+ * the user is fully signed out everywhere within that window. Non-destructive:
+ * they can simply log back in. For banned/suspended/deleted users the
+ * moderation gates already revoke tokens — this covers live/active users
+ * (e.g. a compromised account that shouldn't be banned outright).
+ */
+exports.logoutAllSessions = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const user = await User.findById(id);
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+    if (user.isAdmin) {
+      return res.status(400).json({ success: false, message: 'Use your own logout for admin accounts' });
+    }
+
+    const hadSessions = (user.refreshTokens || []).length;
+    user.refreshTokens = [];
+    await user.save();
+
+    logAction({
+      adminId: req.admin.id,
+      adminName: req.admin.username || req.admin.id,
+      action: 'logout_all_sessions',
+      description: `Signed out ${hadSessions} session(s) for "${user.username}" on all devices`,
+      targetId: id,
+      targetType: 'user',
+      metadata: { revokedSessions: hadSessions },
+    });
+
+    res.json({
+      success: true,
+      message: hadSessions > 0
+        ? `${user.username} signed out of ${hadSessions} session(s) — takes effect within 15 minutes`
+        : `${user.username} had no active sessions`,
+      revokedSessions: hadSessions,
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * POST /users/bulk
+ * Bulk moderation in one call. Actions mirror the single-user endpoints so
+ * guards stay identical: admins are skipped (never banned/tiered/deleted),
+ * self is refused outright, deletes are soft, every action is activity-logged.
+ * Body: { ids: string[], action: 'ban'|'suspend'|'restore'|'logout_all'|'delete'
+ *               tier?: 'new'|'verified'|'trusted'|'' (when action='set_tier'),
+ *               reason?: string }
+ */
+exports.bulkUserAction = async (req, res) => {
+  try {
+    const { ids, action, tier = '', reason = '' } = req.body;
+
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ success: false, message: 'ids must be a non-empty array' });
+    }
+    if (ids.length > 100) {
+      return res.status(400).json({ success: false, message: 'Bulk actions are capped at 100 users per call' });
+    }
+
+    const VALID_ACTIONS = ['ban', 'suspend', 'restore', 'logout_all', 'set_tier', 'delete'];
+    if (!VALID_ACTIONS.includes(action)) {
+      return res.status(400).json({ success: false, message: `action must be one of: ${VALID_ACTIONS.join(', ')}` });
+    }
+    if (action === 'set_tier' && !['new', 'verified', 'trusted', ''].includes(tier)) {
+      return res.status(400).json({ success: false, message: 'tier must be new, verified, trusted, or empty' });
+    }
+    if (ids.includes(String(req.admin.id))) {
+      return res.status(400).json({ success: false, message: 'Bulk actions cannot target your own account — remove yourself from the selection' });
+    }
+
+    const results = { succeeded: [], failed: [], skippedAdmins: [] };
+
+    for (const id of ids) {
+      try {
+        const user = await User.findById(id);
+        if (!user) { results.failed.push({ id, reason: 'not found' }); continue; }
+        if (user.isAdmin) { results.skippedAdmins.push(user.username); continue; }
+        if (user.deleted && action !== 'delete') { results.failed.push({ id, reason: 'already deleted' }); continue; }
+
+        switch (action) {
+          case 'ban':
+          case 'suspend':
+          case 'restore': {
+            const status = action === 'ban' ? 'banned' : action === 'suspend' ? 'suspended' : 'active';
+            user.accountStatus = status;
+            user.statusReason = status === 'active' ? '' : String(reason || '').slice(0, 300);
+            user.statusChangedAt = new Date();
+            if (status !== 'active') user.refreshTokens = [];
+            await user.save();
+            break;
+          }
+          case 'logout_all':
+            user.refreshTokens = [];
+            await user.save();
+            break;
+          case 'set_tier':
+            user.writerTierOverride = tier;
+            if (tier !== '' && user.writerDemoted && (tier === 'verified' || tier === 'trusted')) {
+              user.writerDemoted = false;
+            }
+            await user.save();
+            break;
+          case 'delete': {
+            if (user.deleted) { results.failed.push({ id, reason: 'already deleted' }); continue; }
+            user.deleted = true;
+            user.deletedAt = new Date();
+            user.accountStatus = 'banned';
+            user.statusReason = user.statusReason || 'Account deleted by admin';
+            user.refreshTokens = [];
+            await user.save();
+            await Comment.updateMany(
+              { userId: id, $or: [{ name: { $exists: false } }, { name: null }, { name: '' }] },
+              { $set: { name: '[deleted user]' } }
+            );
+            break;
+          }
+        }
+        results.succeeded.push(user.username);
+      } catch (err) {
+        results.failed.push({ id, reason: err.message });
+      }
+    }
+
+    logAction({
+      adminId: req.admin.id,
+      adminName: req.admin.username || req.admin.id,
+      action: 'bulk_user_action',
+      description: `Bulk ${action}${action === 'set_tier' ? ` → ${tier || 'auto'}` : ''} on ${results.succeeded.length} user(s)${results.skippedAdmins.length ? `, ${results.skippedAdmins.length} admin(s) skipped` : ''}${results.failed.length ? `, ${results.failed.length} failed` : ''}${reason ? ` — reason: ${String(reason).slice(0, 200)}` : ''}`,
+      targetId: null,
+      targetType: null,
+      metadata: { action, tier, reason, succeeded: results.succeeded.length, failed: results.failed.length, skippedAdmins: results.skippedAdmins.length, ids },
+    });
+
+    res.json({
+      success: results.failed.length === 0,
+      message: results.failed.length === 0 && results.skippedAdmins.length === 0
+        ? `${action} applied to ${results.succeeded.length} user(s)`
+        : `${results.succeeded.length} succeeded, ${results.failed.length} failed${results.skippedAdmins.length ? `, ${results.skippedAdmins.length} admin(s) skipped` : ''}`,
+      ...results,
     });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });

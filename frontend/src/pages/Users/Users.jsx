@@ -57,11 +57,14 @@ export default function UsersPage() {
   const [isActionLoading, setIsActionLoading] = useState(false);
 
   // Redesign states
-  const [roleFilter, setRoleFilter] = useState('all'); // 'all' | 'admins' | 'verified' | 'writers'
+  const [roleFilter, setRoleFilter] = useState('all'); // 'all' | 'admins' | 'verified' | 'writers' | 'banned'
   const [sortBy, setSortBy] = useState('newest'); // 'newest' | 'oldest' | 'alphabetical'
+  // Bulk selection — Set of user ids, cleared on filter/page change
+  const [selectedIds, setSelectedIds] = useState(new Set());
 
   useEffect(() => {
     fetchUsers();
+    setSelectedIds(new Set());
   }, [page, roleFilter]);
 
   const fetchUsers = async () => {
@@ -118,6 +121,67 @@ export default function UsersPage() {
     } finally {
       setIsActionLoading(false);
     }
+  };
+
+  // ---- Bulk selection -----------------------------------------------------
+  const toggleSelect = (id) => setSelectedIds(prev => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+  const toggleSelectAll = () => setSelectedIds(prev =>
+    prev.size === users.filter(u => !u.isAdmin).length ? new Set() : new Set(users.filter(u => !u.isAdmin).map(u => u._id))
+  );
+
+  const handleBulkAction = async (action, extra = {}) => {
+    const ids = [...selectedIds];
+    if (ids.length === 0) return;
+    let reason = extra.reason ?? '';
+    if ((action === 'ban' || action === 'suspend') && extra.reason === undefined) {
+      const r = window.prompt(`Reason (optional) for ${action === 'ban' ? 'banning' : 'suspending'} ${ids.length} user(s):`);
+      if (r === null) return; // cancelled
+      reason = r;
+    }
+    if (action === 'delete' && !window.confirm(`Permanently delete ${ids.length} account(s)?\nTheir posts and comments are kept; they can never log in again.`)) return;
+
+    setIsActionLoading(true);
+    try {
+      const res = await adminAPI.post('/users/bulk', { ids, action, reason, tier: extra.tier ?? '' });
+      if (res.success !== false) {
+        toast.success(res.message || 'Done');
+        if (res.skippedAdmins?.length) toast(`${res.skippedAdmins.length} admin account(s) skipped`, { icon: '⚠️' });
+        if (res.failed?.length) toast.error(`${res.failed.length} action(s) failed`);
+        setSelectedIds(new Set());
+        fetchUsers();
+      }
+    } catch (err) {
+      toast.error(err?.message || 'Bulk action failed');
+    } finally {
+      setIsActionLoading(false);
+    }
+  };
+
+  const handleLogoutAll = async (userId) => {
+    setIsActionLoading(true);
+    try {
+      const res = await adminAPI.post(`/users/${userId}/logout-all`);
+      toast.success(res.message || 'Sessions revoked');
+      openUserDetail({ _id: userId }); // refresh drawer — sessions should now be empty
+    } catch (err) {
+      toast.error(err?.message || 'Failed to sign out sessions');
+    } finally {
+      setIsActionLoading(false);
+    }
+  };
+
+  const timeAgo = (date) => {
+    if (!date) return 'never';
+    const mins = Math.floor((Date.now() - new Date(date).getTime()) / 60000);
+    if (mins < 1) return 'just now';
+    if (mins < 60) return `${mins}m ago`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `${hrs}h ago`;
+    return `${Math.floor(hrs / 24)}d ago`;
   };
 
   const handleToggleAdmin = async (userId) => {
@@ -432,6 +496,67 @@ export default function UsersPage() {
         </div>
       </div>
 
+      {/* Bulk action bar — appears when rows are selected */}
+      <AnimatePresence>
+        {selectedIds.size > 0 && (
+          <motion.div
+            initial={{ y: 40, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: 40, opacity: 0 }}
+            className="fixed bottom-5 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2 px-4 py-2.5 rounded-xl bg-neutral-900 dark:bg-[#1b1b1e] border border-white/10 shadow-2xl"
+          >
+            <span className="text-xs font-semibold text-white pr-1">
+              {selectedIds.size} selected
+            </span>
+            <span className="w-px h-5 bg-white/10" />
+            <button
+              onClick={() => handleBulkAction('suspend')}
+              disabled={isActionLoading}
+              className="px-2.5 py-1.5 rounded-lg text-[11px] font-semibold text-amber-300 hover:bg-amber-500/15 transition-colors disabled:opacity-40"
+            >
+              Suspend
+            </button>
+            <button
+              onClick={() => handleBulkAction('ban')}
+              disabled={isActionLoading}
+              className="px-2.5 py-1.5 rounded-lg text-[11px] font-semibold text-red-300 hover:bg-red-500/15 transition-colors disabled:opacity-40"
+            >
+              Ban
+            </button>
+            <button
+              onClick={() => handleBulkAction('restore')}
+              disabled={isActionLoading}
+              className="px-2.5 py-1.5 rounded-lg text-[11px] font-semibold text-emerald-300 hover:bg-emerald-500/15 transition-colors disabled:opacity-40"
+            >
+              Restore
+            </button>
+            <button
+              onClick={() => handleBulkAction('logout_all')}
+              disabled={isActionLoading}
+              className="px-2.5 py-1.5 rounded-lg text-[11px] font-semibold text-blue-300 hover:bg-blue-500/15 transition-colors disabled:opacity-40"
+              title="Sign out all selected users on all devices"
+            >
+              Sign Out
+            </button>
+            <button
+              onClick={() => handleBulkAction('delete')}
+              disabled={isActionLoading}
+              className="px-2.5 py-1.5 rounded-lg text-[11px] font-semibold text-red-400 hover:bg-red-500/25 transition-colors disabled:opacity-40"
+            >
+              Delete
+            </button>
+            <span className="w-px h-5 bg-white/10" />
+            <button
+              onClick={() => setSelectedIds(new Set())}
+              className="p-1.5 rounded-lg text-neutral-400 hover:text-white hover:bg-white/10 transition-colors"
+              title="Clear selection"
+            >
+              <X size={13} />
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* User listing body */}
       <div className="flex-1 overflow-y-auto px-6 pb-6">
         {isLoading ? (
@@ -463,10 +588,19 @@ export default function UsersPage() {
             <div className="min-w-full divide-y divide-neutral-200/50 dark:divide-white/5">
               {/* Header column names */}
               <div className="bg-neutral-50/50 dark:bg-neutral-900/30 px-5 py-2 flex items-center text-[10px] font-semibold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider">
-                <div className="w-[35%]">User Details</div>
-                <div className="w-[30%]">Email Address</div>
-                <div className="w-[15%]">Role & Verification</div>
-                <div className="w-[20%] text-right">Date Joined</div>
+                <div className="w-[28px] shrink-0">
+                  <input
+                    type="checkbox"
+                    checked={users.filter(u => !u.isAdmin).length > 0 && selectedIds.size === users.filter(u => !u.isAdmin).length}
+                    onChange={toggleSelectAll}
+                    className="w-3.5 h-3.5 accent-neutral-900 dark:accent-white cursor-pointer"
+                    title="Select all non-admin users on this page"
+                  />
+                </div>
+                <div className="w-[32%]">User Details</div>
+                <div className="w-[27%]">Email Address</div>
+                <div className="w-[16%]">Role & Verification</div>
+                <div className="w-[25%] text-right">Date Joined</div>
               </div>
 
               {/* Rows */}
@@ -479,8 +613,19 @@ export default function UsersPage() {
                       selectedUser?._id === user._id ? 'bg-neutral-100/60 dark:bg-white/5 font-medium' : ''
                     }`}
                   >
+                    {/* Bulk-select checkbox — admins are never selectable */}
+                    <div className="w-[28px] shrink-0" onClick={(e) => e.stopPropagation()}>
+                      {!user.isAdmin && (
+                        <input
+                          type="checkbox"
+                          checked={selectedIds.has(user._id)}
+                          onChange={() => toggleSelect(user._id)}
+                          className="w-3.5 h-3.5 accent-neutral-900 dark:accent-white cursor-pointer"
+                        />
+                      )}
+                    </div>
                     {/* User profile details */}
-                    <div className="w-[35%] flex items-center gap-3 pr-4 min-w-0">
+                    <div className="w-[32%] flex items-center gap-3 pr-4 min-w-0">
                       <div className="w-8 h-8 rounded-lg overflow-hidden border border-neutral-200/50 dark:border-white/10 bg-neutral-100 shrink-0">
                         <img
                           src={user.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(user.username)}`}
@@ -502,12 +647,12 @@ export default function UsersPage() {
                     </div>
 
                     {/* Email */}
-                    <div className="w-[30%] truncate pr-2 text-neutral-500 dark:text-neutral-400">
+                    <div className="w-[27%] truncate pr-2 text-neutral-500 dark:text-neutral-400">
                       {user.email}
                     </div>
 
                     {/* Role / Verification */}
-                    <div className="w-[15%] pr-2 flex items-center gap-2">
+                    <div className="w-[16%] pr-2 flex items-center gap-2">
                       {user.isAdmin && (
                         <span className="px-1.5 py-0.5 bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/10 rounded text-[9px] font-bold">
                           ADMIN
@@ -531,8 +676,10 @@ export default function UsersPage() {
                     </div>
 
                     {/* Joined Date */}
-                    <div className="w-[20%] text-right text-neutral-400 font-medium">
-                      {new Date(user.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                    <div className="w-[25%] text-right text-neutral-400 font-medium">
+                      <span className="truncate">
+                        {new Date(user.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                      </span>
                     </div>
                   </div>
                 ))}
@@ -741,6 +888,71 @@ export default function UsersPage() {
                         ))}
                       </div>
                     </div>
+                  </div>
+                )}
+
+                {/* Sessions card */}
+                {Array.isArray(selectedUser.sessions) && (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[9px] font-semibold text-neutral-400 uppercase tracking-wider">
+                        Active Sessions ({selectedUser.sessions.length})
+                      </span>
+                      {selectedUser.sessions.length > 0 && !selectedUser.isAdmin && (
+                        <button
+                          onClick={() => handleLogoutAll(selectedUser._id)}
+                          disabled={isActionLoading}
+                          className="text-[9px] font-semibold text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-40"
+                          title="Revoke all refresh tokens — the user is signed out everywhere within 15 minutes"
+                        >
+                          Log out everywhere
+                        </button>
+                      )}
+                    </div>
+                    <div className="bg-neutral-50/30 dark:bg-[#1b1b1e]/20 border border-neutral-200/35 dark:border-white/5 rounded-xl p-2.5">
+                      {selectedUser.sessions.length === 0 ? (
+                        <p className="text-[10px] text-neutral-400 italic">No active sessions</p>
+                      ) : (
+                        <div className="space-y-1.5">
+                          {selectedUser.sessions.map((s, i) => (
+                            <div key={i} className="flex items-center justify-between gap-2 text-[10px]">
+                              <span className="text-neutral-600 dark:text-neutral-300 truncate">{s.device}</span>
+                              <span className="text-neutral-400 shrink-0">{timeAgo(s.lastUsedAt)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      <p className="text-[8.5px] text-neutral-400 mt-2 leading-relaxed">
+                        Revoking sessions kills refresh tokens; their current access token expires within 15 minutes.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Admin activity timeline */}
+                {Array.isArray(selectedUser.activity) && (
+                  <div className="space-y-2">
+                    <span className="block text-[9px] font-semibold text-neutral-400 uppercase tracking-wider">
+                      Admin History
+                    </span>
+                    {selectedUser.activity.length === 0 ? (
+                      <div className="bg-neutral-50/30 dark:bg-[#1b1b1e]/20 border border-neutral-200/35 dark:border-white/5 rounded-xl p-2.5">
+                        <p className="text-[10px] text-neutral-400 italic">No admin actions on this account yet</p>
+                      </div>
+                    ) : (
+                      <div className="relative pl-3.5 space-y-2.5">
+                        <span className="absolute left-[5px] top-1.5 bottom-1.5 w-px bg-neutral-200 dark:bg-white/10" />
+                        {selectedUser.activity.map((log, i) => (
+                          <div key={i} className="relative">
+                            <span className="absolute -left-[12px] top-1 w-2 h-2 rounded-full bg-neutral-300 dark:bg-neutral-600 border border-white dark:border-[#151518]" />
+                            <p className="text-[10px] text-neutral-700 dark:text-neutral-300 leading-snug">{log.description}</p>
+                            <p className="text-[8.5px] text-neutral-400 mt-0.5">
+                              {log.adminName} · {timeAgo(log.createdAt)}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )}
 

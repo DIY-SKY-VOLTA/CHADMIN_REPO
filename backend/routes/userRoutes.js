@@ -12,5 +12,7 @@ router.post('/:id/toggle-verified', userController.toggleVerifiedStatus);
 router.put('/:id/writer-tier', userController.setWriterTier);
 router.put('/:id/status', userController.setAccountStatus);
 router.delete('/:id', userController.deleteUser);
+router.post('/:id/logout-all', userController.logoutAllSessions);
+router.post('/bulk', userController.bulkUserAction);
 // Writer stats are returned inline in listUsers and getUserById
 module.exports = router;
