@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useLayoutEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { Plus, X, Trash2, ChevronDown, ChevronLeft, ChevronRight, Calendar, Clock, Copy, Check } from 'lucide-react';
+import { Plus, X, Trash2, ChevronDown, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Calendar, Clock, Copy, Check } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'react-hot-toast';
 import { copyToClipboard } from '@/utils/clipboard';
@@ -70,6 +70,34 @@ const pad2 = (n) => String(n).padStart(2, '0');
 const todayStr = () => {
   const d = new Date();
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+};
+
+/**
+ * Parse a typed date into the picker's `YYYY-MM-DDTHH:mm` shape.
+ * Accepts `2026-06-15`, `2026-6-15 9:30`, `2026-06-15T09:30`, and
+ * natural language containing a month name ("June 5 2026", "5 Jun 2026").
+ * Numeric slash forms (10/09/2026) are deliberately rejected — US vs EU
+ * ambiguity would silently corrupt deadlines. Dates are UTC wall time,
+ * matching how the form serializes (appends Z).
+ */
+const parseTypedDate = (raw, fallbackTime = '00:00') => {
+  const s = raw.trim();
+  const m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:[T ](\d{1,2}):(\d{2}))?$/);
+  if (m) {
+    const [, y, mo, d, h, mi] = m;
+    const probe = new Date(Date.UTC(+y, +mo - 1, +d));
+    if (probe.getUTCMonth() !== +mo - 1 || probe.getUTCDate() !== +d) return null; // rejects Feb 30
+    const time = h !== undefined ? `${pad2(+h)}:${mi}` : fallbackTime;
+    return `${y}-${pad2(+mo)}-${pad2(+d)}T${time}`;
+  }
+  // Natural-language fallback — only when a month name is present
+  if (/[a-zA-Z]{3}/.test(s)) {
+    const d2 = new Date(s);
+    if (!Number.isNaN(d2.getTime()) && d2.getFullYear() >= 2000 && d2.getFullYear() <= 2100) {
+      return `${d2.getFullYear()}-${pad2(d2.getMonth() + 1)}-${pad2(d2.getDate())}T${fallbackTime}`;
+    }
+  }
+  return null;
 };
 
 /**
@@ -177,19 +205,55 @@ export const DateTimePicker = ({ value, onChange, className }) => {
     onChange(`${todayStr()}T${t}`);
   };
 
+  // ---- Typed input ---------------------------------------------------------
+  // The field is typeable: admins backfilling completed contests can paste or
+  // type "2026-06-15" directly instead of clicking ◀ month-by-month through
+  // the calendar. Edits stay local until commit (Enter or blur); invalid
+  // input is rejected with a toast and the committed value is restored.
+  const [typed, setTyped] = useState(null); // null = not editing, show formatted value
+  const commitTyped = () => {
+    if (typed === null) return;
+    const s = typed.trim();
+    setTyped(null);
+    if (s === '') { onChange(''); return; } // explicit clear by deleting text
+    const parsed = parseTypedDate(s, timePart || '00:00');
+    if (parsed) {
+      onChange(parsed);
+    } else {
+      toast.error(`Can't read date "${s}" — use YYYY-MM-DD (e.g. 2026-06-15)`);
+    }
+  };
+
   return (
     <div className={className}>
-      <button
-        ref={triggerRef}
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        className={`${inputCls} flex items-center justify-between gap-2 text-left cursor-pointer ${
-          hasDate ? 'text-neutral-900 dark:text-neutral-100' : 'text-neutral-400 dark:text-neutral-500'
-        }`}
-      >
-        <span className="truncate">{displayLabel()}</span>
-        <Calendar size={13} className="shrink-0 text-neutral-400" />
-      </button>
+      <div ref={triggerRef} className="relative flex items-center">
+        <input
+          type="text"
+          value={typed !== null ? typed : displayLabel()}
+          onChange={(e) => setTyped(e.target.value)}
+          onFocus={(e) => { if (!hasDate && typed === null) setTyped(''); e.target.select(); }}
+          onBlur={commitTyped}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') { e.preventDefault(); commitTyped(); e.target.blur(); }
+            if (e.key === 'Escape') { setTyped(null); e.target.blur(); }
+          }}
+          placeholder="Pick date & time"
+          aria-label="Date and time (type YYYY-MM-DD or open the calendar)"
+          className={`${inputCls} flex-1 min-w-0 pr-8 text-left cursor-text ${
+            hasDate || typed !== null ? 'text-neutral-900 dark:text-neutral-100' : 'text-neutral-400 dark:text-neutral-500'
+          }`}
+        />
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          className="absolute right-2 p-1 rounded-md text-neutral-400 hover:text-neutral-700 dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-white/10 transition-colors"
+          title="Open calendar"
+          aria-label="Open calendar"
+          tabIndex={-1}
+        >
+          <Calendar size={13} />
+        </button>
+      </div>
 
       {open &&
         createPortal(
@@ -198,25 +262,50 @@ export const DateTimePicker = ({ value, onChange, className }) => {
             className="fixed z-50 bg-white dark:bg-[#18181b] border border-neutral-200/60 dark:border-white/10 rounded-xl shadow-xl shadow-neutral-900/10 dark:shadow-black/40 p-3 space-y-3"
             style={{ top: pos.top, left: pos.left, width: pos.width }}
           >
-            {/* Month navigation */}
+            {/* Month + year navigation — year jumps matter for backfilling
+                already-completed contests, whose dates can be months away */}
             <div className="flex items-center justify-between">
-              <button
-                type="button"
-                onClick={() => setView(new Date(year, month - 1, 1))}
-                className="p-1 rounded-md hover:bg-neutral-100 dark:hover:bg-white/10 text-neutral-500 dark:text-neutral-400 transition-colors"
-                title="Previous month"
-              >
-                <ChevronLeft size={14} />
-              </button>
+              <div className="flex items-center gap-0.5">
+                <button
+                  type="button"
+                  onClick={() => setView(new Date(year - 1, month, 1))}
+                  className="p-1 rounded-md hover:bg-neutral-100 dark:hover:bg-white/10 text-neutral-500 dark:text-neutral-400 transition-colors"
+                  title="Previous year"
+                  aria-label="Previous year"
+                >
+                  <ChevronsLeft size={14} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setView(new Date(year, month - 1, 1))}
+                  className="p-1 rounded-md hover:bg-neutral-100 dark:hover:bg-white/10 text-neutral-500 dark:text-neutral-400 transition-colors"
+                  title="Previous month"
+                  aria-label="Previous month"
+                >
+                  <ChevronLeft size={14} />
+                </button>
+              </div>
               <span className="text-[11px] font-semibold text-neutral-800 dark:text-neutral-100">{monthLabel}</span>
-              <button
-                type="button"
-                onClick={() => setView(new Date(year, month + 1, 1))}
-                className="p-1 rounded-md hover:bg-neutral-100 dark:hover:bg-white/10 text-neutral-500 dark:text-neutral-400 transition-colors"
-                title="Next month"
-              >
-                <ChevronRight size={14} />
-              </button>
+              <div className="flex items-center gap-0.5">
+                <button
+                  type="button"
+                  onClick={() => setView(new Date(year, month + 1, 1))}
+                  className="p-1 rounded-md hover:bg-neutral-100 dark:hover:bg-white/10 text-neutral-500 dark:text-neutral-400 transition-colors"
+                  title="Next month"
+                  aria-label="Next month"
+                >
+                  <ChevronRight size={14} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setView(new Date(year + 1, month, 1))}
+                  className="p-1 rounded-md hover:bg-neutral-100 dark:hover:bg-white/10 text-neutral-500 dark:text-neutral-400 transition-colors"
+                  title="Next year"
+                  aria-label="Next year"
+                >
+                  <ChevronsRight size={14} />
+                </button>
+              </div>
             </div>
 
             {/* Weekday header */}
