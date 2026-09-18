@@ -113,6 +113,19 @@ const userSchema = new mongoose.Schema({
   },
   resetPasswordToken: String,
   resetPasswordExpires: Date,
+  // Mirrors Phase2's auth session store (shared collection, Phase2 user.model
+  // ~line 328). Declared here so admin-side session wipes (logout-all, ban,
+  // delete) actually persist — Mongoose strict mode silently drops fields not
+  // in the schema. The admin dashboard never issues tokens; it only displays
+  // device labels and revokes. Field-for-field match, including `ip`.
+  refreshTokens: [{
+    tokenHash: { type: String, required: true },
+    device: { type: String, default: 'Unknown device', maxlength: 200 },
+    ip: { type: String, default: '' },
+    createdAt: { type: Date, default: Date.now },
+    lastUsedAt: { type: Date, default: Date.now },
+    expiresAt: { type: Date, required: true },
+  }],
 
   savedContests: [{
     contestId: {

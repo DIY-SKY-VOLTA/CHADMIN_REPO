@@ -27,6 +27,7 @@ import {
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'react-hot-toast';
 import adminAPI from '@/api/adminAPI';
+import ConfirmDialog from '@/components/UI/ConfirmDialog';
 
 const tierConfig = {
   new:      { label: 'New Writer',      color: 'text-neutral-500 dark:text-neutral-400 bg-neutral-100 dark:bg-white/5 border-neutral-250 dark:border-white/5', hint: 'Every post goes to the review queue' },
@@ -58,6 +59,8 @@ export default function UsersPage() {
 
   // Redesign states
   const [roleFilter, setRoleFilter] = useState('all'); // 'all' | 'admins' | 'verified' | 'writers' | 'banned'
+  // Pending confirmation — renders ConfirmDialog instead of native prompt/confirm
+  const [dialog, setDialog] = useState(null);
   const [sortBy, setSortBy] = useState('newest'); // 'newest' | 'oldest' | 'alphabetical'
   // Bulk selection — Set of user ids, cleared on filter/page change
   const [selectedIds, setSelectedIds] = useState(new Set());
@@ -133,45 +136,95 @@ export default function UsersPage() {
     prev.size === users.filter(u => !u.isAdmin).length ? new Set() : new Set(users.filter(u => !u.isAdmin).map(u => u._id))
   );
 
-  const handleBulkAction = async (action, extra = {}) => {
-    const ids = [...selectedIds];
-    if (ids.length === 0) return;
-    let reason = extra.reason ?? '';
-    if ((action === 'ban' || action === 'suspend') && extra.reason === undefined) {
-      const r = window.prompt(`Reason (optional) for ${action === 'ban' ? 'banning' : 'suspending'} ${ids.length} user(s):`);
-      if (r === null) return; // cancelled
-      reason = r;
-    }
-    if (action === 'delete' && !window.confirm(`Permanently delete ${ids.length} account(s)?\nTheir posts and comments are kept; they can never log in again.`)) return;
+  // Error messages: adminAPI's interceptor rejects with the response BODY
+  // (not an axios error), so the message is at err.message directly.
+  const apiErrMsg = (err, fallback) => err?.message || fallback;
 
+  const executeBulkAction = async (action, ids, reason = '', tier = '') => {
     setIsActionLoading(true);
     try {
-      const res = await adminAPI.post('/users/bulk', { ids, action, reason, tier: extra.tier ?? '' });
+      const res = await adminAPI.post('/users/bulk', { ids, action, reason, tier });
       if (res.success !== false) {
         toast.success(res.message || 'Done');
         if (res.skippedAdmins?.length) toast(`${res.skippedAdmins.length} admin account(s) skipped`, { icon: '⚠️' });
         if (res.failed?.length) toast.error(`${res.failed.length} action(s) failed`);
         setSelectedIds(new Set());
         fetchUsers();
+      } else {
+        toast.error(res.message || 'Bulk action failed');
       }
     } catch (err) {
-      toast.error(err?.message || 'Bulk action failed');
+      toast.error(apiErrMsg(err, 'Bulk action failed'));
     } finally {
       setIsActionLoading(false);
     }
   };
 
-  const handleLogoutAll = async (userId) => {
-    setIsActionLoading(true);
-    try {
-      const res = await adminAPI.post(`/users/${userId}/logout-all`);
-      toast.success(res.message || 'Sessions revoked');
-      openUserDetail({ _id: userId }); // refresh drawer — sessions should now be empty
-    } catch (err) {
-      toast.error(err?.message || 'Failed to sign out sessions');
-    } finally {
-      setIsActionLoading(false);
+  // Open confirmation dialogs instead of native prompt/confirm.
+  const handleBulkAction = (action) => {
+    const ids = [...selectedIds];
+    if (ids.length === 0) return;
+    const label = ids.length === 1 ? '1 user' : `${ids.length} users`;
+    if (action === 'suspend') {
+      setDialog({
+        title: `Suspend ${label}?`,
+        intent: 'warn', actionIcon: 'suspend',
+        confirmLabel: 'Suspend',
+        inputLabel: 'Reason (optional)', inputPlaceholder: 'e.g. suspicious activity',
+        body: <>They will be signed out and cannot log in until you restore access.</>,
+        onConfirm: (reason) => executeBulkAction('suspend', ids, reason),
+      });
+    } else if (action === 'ban') {
+      setDialog({
+        title: `Ban ${label}?`,
+        intent: 'danger', actionIcon: 'ban',
+        confirmLabel: 'Ban',
+        inputLabel: 'Reason (optional)', inputPlaceholder: 'e.g. spam, abuse',
+        body: <>They are signed out everywhere and permanently blocked from logging in with this account.</>,
+        onConfirm: (reason) => executeBulkAction('ban', ids, reason),
+      });
+    } else if (action === 'restore') {
+      executeBulkAction('restore', ids);
+    } else if (action === 'logout_all') {
+      setDialog({
+        title: `Sign out ${label}?`,
+        intent: 'neutral', actionIcon: 'logout',
+        confirmLabel: 'Sign out everywhere',
+        body: <>All active sessions are revoked. They can simply log back in — nothing is lost.</>,
+        onConfirm: () => executeBulkAction('logout_all', ids),
+      });
+    } else if (action === 'delete') {
+      setDialog({
+        title: `Permanently delete ${label}?`,
+        intent: 'danger', actionIcon: 'delete',
+        confirmLabel: 'Delete forever',
+        requireText: 'DELETE',
+        body: <>Their posts and comments are kept for the record, but they are removed from every list and can <strong>never log in again</strong>.</>,
+        onConfirm: () => executeBulkAction('delete', ids),
+      });
     }
+  };
+
+  const handleLogoutAll = (userId) => {
+    const user = users.find(u => u._id === userId) || selectedUser;
+    setDialog({
+      title: `Sign out ${user?.username || 'this user'} everywhere?`,
+      intent: 'neutral', actionIcon: 'logout',
+      confirmLabel: 'Sign out everywhere',
+      body: <>All active sessions are revoked; their current token dies within 15 minutes. They can log back in normally.</>,
+      onConfirm: async () => {
+        setIsActionLoading(true);
+        try {
+          const res = await adminAPI.post(`/users/${userId}/logout-all`);
+          toast.success(res.message || 'Sessions revoked');
+          openUserDetail({ _id: userId });
+        } catch (err) {
+          toast.error(apiErrMsg(err, 'Failed to sign out sessions'));
+        } finally {
+          setIsActionLoading(false);
+        }
+      },
+    });
   };
 
   const timeAgo = (date) => {
@@ -220,9 +273,31 @@ export default function UsersPage() {
     }
   };
 
-  // Ban / suspend / restore. Mirrors setAccountStatus guards: admins and
-  // self are refused server-side; the UI hides the controls for them too.
-  const handleSetStatus = async (userId, status, reason = '') => {
+  // Ban / suspend / restore — opens a themed dialog first. Mirrors the
+  // setAccountStatus guards: admins and self are refused server-side; the
+  // UI hides the controls for them too.
+  const openStatusDialog = (user, status) => {
+    if (status === 'active') {
+      // Restore is safe — no confirmation needed
+      executeSetStatus(user._id, 'active', '');
+      return;
+    }
+    const isBan = status === 'banned';
+    setDialog({
+      title: `${isBan ? 'Ban' : 'Suspend'} ${user.username}?`,
+      intent: isBan ? 'danger' : 'warn',
+      actionIcon: isBan ? 'ban' : 'suspend',
+      confirmLabel: isBan ? 'Ban' : 'Suspend',
+      inputLabel: 'Reason (optional)',
+      inputPlaceholder: isBan ? 'e.g. spam, abuse' : 'e.g. suspicious activity',
+      body: isBan
+        ? <>They are signed out everywhere and permanently blocked from logging in with this account.</>
+        : <>They will be signed out and cannot log in until you restore access.</>,
+      onConfirm: (reason) => executeSetStatus(user._id, status, reason),
+    });
+  };
+
+  const executeSetStatus = async (userId, status, reason = '') => {
     setIsActionLoading(true);
     try {
       const res = await adminAPI.put(`/users/${userId}/status`, { status, reason });
@@ -239,9 +314,11 @@ export default function UsersPage() {
             statusChangedAt: new Date().toISOString(),
           }));
         }
+      } else {
+        toast.error(res.message || 'Failed to update account status');
       }
     } catch (err) {
-      toast.error(err?.response?.data?.message || 'Failed to update account status');
+      toast.error(apiErrMsg(err, 'Failed to update account status'));
     } finally {
       setIsActionLoading(false);
     }
@@ -250,30 +327,31 @@ export default function UsersPage() {
   // Soft delete with typed confirmation. The user keeps their posts and
   // comments (backend enforces this), but disappears from all lists and
   // can never log in again.
-  const handleDeleteUser = async (user) => {
-    const typed = window.prompt(
-      `Permanently delete "${user.username}"?\n\n` +
-      `Their ${user.writerStats?.approved ?? 0} published article(s) and comments stay online for the record, ` +
-      `but they are removed from all lists and can never log in again.\n\n` +
-      `Type DELETE to confirm.`
-    );
-    if (typed !== 'DELETE') {
-      if (typed !== null) toast.error('Confirmation did not match — deletion cancelled');
-      return;
-    }
-    setIsActionLoading(true);
-    try {
-      const res = await adminAPI.delete(`/users/${user._id}`);
-      if (res.success) {
-        toast.success(res.message);
-        setSelectedUser(null);
-        setUsers(prev => prev.filter(u => u._id !== user._id));
-      }
-    } catch (err) {
-      toast.error(err?.response?.data?.message || 'Failed to delete user');
-    } finally {
-      setIsActionLoading(false);
-    }
+  const handleDeleteUser = (user) => {
+    setDialog({
+      title: `Permanently delete ${user.username}?`,
+      intent: 'danger', actionIcon: 'delete',
+      confirmLabel: 'Delete forever',
+      requireText: 'DELETE',
+      body: <>Their {user.writerStats?.approved ?? 0} published article(s) and comments stay online for the record, but they are removed from every list and can <strong>never log in again</strong>.</>,
+      onConfirm: async () => {
+        setIsActionLoading(true);
+        try {
+          const res = await adminAPI.delete(`/users/${user._id}`);
+          if (res.success) {
+            toast.success(res.message);
+            setSelectedUser(null);
+            setUsers(prev => prev.filter(u => u._id !== user._id));
+          } else {
+            toast.error(res.message || 'Failed to delete user');
+          }
+        } catch (err) {
+          toast.error(apiErrMsg(err, 'Failed to delete user'));
+        } finally {
+          setIsActionLoading(false);
+        }
+      },
+    });
   };
 
   const openUserDetail = async (user) => {
@@ -558,7 +636,8 @@ export default function UsersPage() {
       </AnimatePresence>
 
       {/* User listing body */}
-      <div className="flex-1 overflow-y-auto px-6 pb-6">
+      {/* pb-40 keeps the last rows clickable/clear of the floating bulk bar */}
+      <div className="flex-1 overflow-y-auto px-6 pb-40">
         {isLoading ? (
           /* Pulse Row Loading */
           <div className="bg-white dark:bg-[#151518]/70 border border-neutral-200/40 dark:border-white/5 rounded-xl p-4 divide-y divide-neutral-100 dark:divide-white/5 animate-pulse space-y-4">
@@ -1063,11 +1142,7 @@ export default function UsersPage() {
                     {selectedUser.accountStatus === 'active' ? (
                       <>
                         <button
-                          onClick={() => {
-                            const reason = window.prompt(`Suspend "${selectedUser.username}"?\nThey cannot log in until you restore access.\n\nReason (shown to you in the activity log, optional):`);
-                            if (reason === null) return;
-                            handleSetStatus(selectedUser._id, 'suspended', reason);
-                          }}
+                          onClick={() => openStatusDialog(selectedUser, 'suspended')}
                           disabled={isActionLoading}
                           className="py-2 px-3 border border-amber-500/30 rounded-lg text-xs font-semibold text-amber-600 dark:text-amber-400 bg-amber-500/5 hover:bg-amber-500/10 disabled:opacity-40 shadow-sm transition-all flex items-center justify-center gap-1.5"
                           title="Temporarily block login — reversible"
@@ -1076,11 +1151,7 @@ export default function UsersPage() {
                           Suspend
                         </button>
                         <button
-                          onClick={() => {
-                            const reason = window.prompt(`Ban "${selectedUser.username}" permanently?\nThey can never log in again with this account.\n\nReason (optional):`);
-                            if (reason === null) return;
-                            handleSetStatus(selectedUser._id, 'banned', reason);
-                          }}
+                          onClick={() => openStatusDialog(selectedUser, 'banned')}
                           disabled={isActionLoading}
                           className="py-2 px-3 border border-red-500/30 rounded-lg text-xs font-semibold text-red-600 dark:text-red-400 bg-red-500/5 hover:bg-red-500/10 disabled:opacity-40 shadow-sm transition-all flex items-center justify-center gap-1.5"
                           title="Permanently block login"
@@ -1092,7 +1163,7 @@ export default function UsersPage() {
                     ) : (
                       <>
                         <button
-                          onClick={() => handleSetStatus(selectedUser._id, 'active')}
+                          onClick={() => executeSetStatus(selectedUser._id, 'active')}
                           disabled={isActionLoading}
                           className="py-2 px-3 border border-emerald-500/30 rounded-lg text-xs font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-500/5 hover:bg-emerald-500/10 disabled:opacity-40 shadow-sm transition-all flex items-center justify-center gap-1.5"
                           title="Restore login access"
@@ -1102,11 +1173,7 @@ export default function UsersPage() {
                         </button>
                         {selectedUser.accountStatus === 'suspended' && (
                           <button
-                            onClick={() => {
-                              const reason = window.prompt(`Ban "${selectedUser.username}" permanently?\n\nReason (optional):`);
-                              if (reason === null) return;
-                              handleSetStatus(selectedUser._id, 'banned', reason);
-                            }}
+                            onClick={() => openStatusDialog(selectedUser, 'banned')}
                             disabled={isActionLoading}
                             className="py-2 px-3 border border-red-500/30 rounded-lg text-xs font-semibold text-red-600 dark:text-red-400 bg-red-500/5 hover:bg-red-500/10 disabled:opacity-40 shadow-sm transition-all flex items-center justify-center gap-1.5"
                           >
@@ -1136,6 +1203,23 @@ export default function UsersPage() {
           </>
         )}
       </AnimatePresence>
+
+      {/* App-native confirmation dialogs (replaces window.prompt/confirm) */}
+      <ConfirmDialog
+        open={!!dialog}
+        onClose={() => setDialog(null)}
+        onConfirm={(reason) => { const fn = dialog?.onConfirm; setDialog(null); fn?.(reason); }}
+        title={dialog?.title || ''}
+        intent={dialog?.intent}
+        actionIcon={dialog?.actionIcon}
+        confirmLabel={dialog?.confirmLabel}
+        inputLabel={dialog?.inputLabel ?? null}
+        inputPlaceholder={dialog?.inputPlaceholder}
+        requireText={dialog?.requireText ?? null}
+        busy={isActionLoading}
+      >
+        {dialog?.body}
+      </ConfirmDialog>
     </div>
   );
 }
