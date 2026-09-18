@@ -3,6 +3,7 @@ const Comment = require('../models/Comment');
 const BlogStats = require('../models/BlogStats');
 const User = require('../models/User');
 const Contests = require('../models/Contests');
+const SearchLog = require('../models/SearchLog');
 
 /**
  * GET /api/admin/analytics/dashboard?range=14
@@ -55,6 +56,9 @@ exports.getDashboardAnalytics = async (req, res) => {
       reviewTimes,
       topCategories,
       totalLikes,
+      searchPopular,
+      searchNoResults,
+      searchTotals,
     ] = await Promise.all([
       BlogSubmission.countDocuments(),
       BlogSubmission.countDocuments({ status: { $in: ['pending', 'pending review'] } }),
@@ -170,6 +174,21 @@ exports.getDashboardAnalytics = async (req, res) => {
 
       // Total likes
       BlogStats.aggregate([{ $group: { _id: null, total: { $sum: '$likes' } } }]),
+
+      // ---- Search insights (SearchLog collection, written by Phase2) -------
+      SearchLog.aggregate([
+        { $match: { createdAt: { $gte: rangeStart } } },
+        { $group: { _id: '$query', count: { $sum: 1 }, avgResults: { $avg: '$resultCount' } } },
+        { $sort: { count: -1 } },
+        { $limit: 30 },
+      ]),
+      SearchLog.aggregate([
+        { $match: { createdAt: { $gte: rangeStart }, resultCount: 0 } },
+        { $group: { _id: '$query', count: { $sum: 1 } } },
+        { $sort: { count: -1 } },
+        { $limit: 12 },
+      ]),
+      SearchLog.countDocuments({ createdAt: { $gte: rangeStart } }),
     ]);
 
     // ---- Derived metrics ---------------------------------------------------
@@ -245,6 +264,14 @@ exports.getDashboardAnalytics = async (req, res) => {
         },
         likes: totalLikes[0]?.total || 0,
         topCategories,
+        searchInsights: {
+          totalSearches: searchTotals,
+          popular: searchPopular
+            .filter(p => p.count >= 2 && p._id.length >= 3 && /[a-zA-Z]/.test(p._id) && !/^\d+$/.test(p._id))
+            .slice(0, 8)
+            .map(p => ({ query: p._id, count: p.count, avgResults: Math.round(p.avgResults * 10) / 10 })),
+          noResults: searchNoResults.map(n => ({ query: n._id, count: n.count })),
+        },
       },
     });
   } catch (error) {

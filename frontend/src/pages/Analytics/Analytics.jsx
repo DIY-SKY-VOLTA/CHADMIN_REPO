@@ -16,6 +16,8 @@ import {
   CheckCircle2,
   XCircle,
   Timer,
+  Search,
+  Info,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'react-hot-toast';
@@ -606,6 +608,94 @@ export default function AnalyticsPage() {
                     </div>
                   );
                 })}
+              </div>
+            )}
+          </motion.div>
+
+          {/* ---------------- Search insights ---------------- */}
+          <motion.div variants={cardVariants} className={`${cardClass} p-5`}>
+            <div className="flex items-center justify-between mb-5">
+              <div className="flex items-center gap-2">
+                <Search size={14} className="text-sky-500" />
+                <span className="text-xs font-bold text-neutral-800 dark:text-neutral-100 uppercase tracking-wider">
+                  Search insights
+                </span>
+                <span
+                  className="text-[10px] text-neutral-400 cursor-help"
+                  title="What visitors typed into search — sourced from the shared SearchLog collection. No-result queries are content gaps: people looked for something the platform doesn't have yet."
+                >
+                  <Info size={12} className="inline" />
+                </span>
+              </div>
+              <span className="text-[11px] text-neutral-400 font-medium tabular-nums">
+                {a.searchInsights.totalSearches.toLocaleString()} searches · last {a.range} days
+              </span>
+            </div>
+
+            {a.searchInsights.totalSearches === 0 ? (
+              <p className="text-xs text-neutral-500 dark:text-neutral-400 py-8 text-center">
+                No searches recorded in this window yet
+              </p>
+            ) : (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                {/* Top queries */}
+                <div>
+                  <p className="text-[10px] font-semibold text-neutral-400 uppercase tracking-wider mb-3">
+                    Top queries
+                  </p>
+                  {a.searchInsights.popular.length === 0 ? (
+                    <p className="text-[11px] text-neutral-400 italic">Not enough repeat searches yet</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {a.searchInsights.popular.map((s, idx) => {
+                        const maxCount = a.searchInsights.popular[0]?.count || 1;
+                        return (
+                          <div key={s.query} className="flex items-center gap-3 group">
+                            <span className="text-[12.5px] font-medium text-neutral-700 dark:text-neutral-200 w-40 truncate" title={s.query}>
+                              {s.query}
+                            </span>
+                            <div className="flex-1 h-2 bg-neutral-100 dark:bg-white/[0.05] rounded-full overflow-hidden">
+                              <motion.div
+                                initial={{ width: 0 }}
+                                animate={{ width: `${(s.count / maxCount) * 100}%` }}
+                                transition={{ duration: 0.5, delay: idx * 0.03 }}
+                                className="h-full bg-sky-500 dark:bg-sky-400 rounded-full"
+                              />
+                            </div>
+                            <span className="text-[11.5px] font-semibold text-neutral-600 dark:text-neutral-300 w-14 text-right tabular-nums" title={`${s.avgResults} avg results`}>
+                              {s.count}×
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* Content gaps */}
+                <div>
+                  <p className="text-[10px] font-semibold text-neutral-400 uppercase tracking-wider mb-3">
+                    No-result queries — content gaps
+                  </p>
+                  {a.searchInsights.noResults.length === 0 ? (
+                    <p className="text-[11px] text-neutral-400 italic">
+                      Nothing missed — every query found results 🎉
+                    </p>
+                  ) : (
+                    <div className="space-y-1.5">
+                      {a.searchInsights.noResults.map((s) => (
+                        <div key={s.query} className="flex items-center justify-between gap-3 px-2.5 py-1.5 rounded-lg bg-amber-50/60 dark:bg-amber-500/[0.06] border border-amber-500/10">
+                          <span className="text-[12px] font-medium text-neutral-700 dark:text-neutral-200 truncate" title={`Users searched "${s.query}" ${s.count} time(s) and found nothing`}>
+                            “{s.query}”
+                          </span>
+                          <span className="text-[11px] font-semibold text-amber-600 dark:text-amber-400 shrink-0 tabular-nums">
+                            {s.count}× missed
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             )}
           </motion.div>
