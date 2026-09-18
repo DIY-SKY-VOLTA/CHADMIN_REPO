@@ -175,7 +175,7 @@ exports.setWriterTier = async (req, res) => {
     }
     user.writerTierOverride = tier;
     if (clearDemotion) user.writerDemoted = false;
-    await user.save();
+    await user.save({ validateModifiedOnly: true });
 
     logAction({
       adminId: req.admin.id,
@@ -207,7 +207,7 @@ exports.toggleAdminStatus = async (req, res) => {
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
 
     user.isAdmin = !user.isAdmin;
-    await user.save();
+    await user.save({ validateModifiedOnly: true });
 
     // Log activity
     logAction({
@@ -239,7 +239,7 @@ exports.toggleVerifiedStatus = async (req, res) => {
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
 
     user.isVerified = !user.isVerified;
-    await user.save();
+    await user.save({ validateModifiedOnly: true });
 
     // Log activity
     logAction({
@@ -322,7 +322,7 @@ exports.setAccountStatus = async (req, res) => {
     user.accountStatus = status;
     user.statusReason = status === 'active' ? '' : String(reason || '').slice(0, 300);
     user.statusChangedAt = new Date();
-    await user.save();
+    await user.save({ validateModifiedOnly: true });
 
     logAction({
       adminId: req.admin.id,
@@ -382,7 +382,7 @@ exports.deleteUser = async (req, res) => {
     user.accountStatus = 'banned';
     user.statusReason = user.statusReason || 'Account deleted by admin';
     user.refreshTokens = [];
-    await user.save();
+    await user.save({ validateModifiedOnly: true });
 
     // Their anonymous comments lose the author linkage — content stays for
     // thread integrity but shows as removed-user rather than a live account.
@@ -431,7 +431,7 @@ exports.logoutAllSessions = async (req, res) => {
 
     const hadSessions = (user.refreshTokens || []).length;
     user.refreshTokens = [];
-    await user.save();
+    await user.save({ validateModifiedOnly: true });
 
     logAction({
       adminId: req.admin.id,
@@ -504,19 +504,19 @@ exports.bulkUserAction = async (req, res) => {
             user.statusReason = status === 'active' ? '' : String(reason || '').slice(0, 300);
             user.statusChangedAt = new Date();
             if (status !== 'active') user.refreshTokens = [];
-            await user.save();
+            await user.save({ validateModifiedOnly: true });
             break;
           }
           case 'logout_all':
             user.refreshTokens = [];
-            await user.save();
+            await user.save({ validateModifiedOnly: true });
             break;
           case 'set_tier':
             user.writerTierOverride = tier;
             if (tier !== '' && user.writerDemoted && (tier === 'verified' || tier === 'trusted')) {
               user.writerDemoted = false;
             }
-            await user.save();
+            await user.save({ validateModifiedOnly: true });
             break;
           case 'delete': {
             if (user.deleted) { results.failed.push({ id, reason: 'already deleted' }); continue; }
@@ -525,7 +525,7 @@ exports.bulkUserAction = async (req, res) => {
             user.accountStatus = 'banned';
             user.statusReason = user.statusReason || 'Account deleted by admin';
             user.refreshTokens = [];
-            await user.save();
+            await user.save({ validateModifiedOnly: true });
             await Comment.updateMany(
               { userId: id, $or: [{ name: { $exists: false } }, { name: null }, { name: '' }] },
               { $set: { name: '[deleted user]' } }

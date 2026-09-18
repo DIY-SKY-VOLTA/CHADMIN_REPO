@@ -147,7 +147,12 @@ export default function UsersPage() {
       if (res.success !== false) {
         toast.success(res.message || 'Done');
         if (res.skippedAdmins?.length) toast(`${res.skippedAdmins.length} admin account(s) skipped`, { icon: '⚠️' });
-        if (res.failed?.length) toast.error(`${res.failed.length} action(s) failed`);
+        if (res.failed?.length) {
+          // Surface the actual reason (e.g. "Password is required") — a bare
+          // count once hid a full-document-validation bug for weeks.
+          const first = res.failed[0]?.reason || 'unknown error';
+          toast.error(`${res.failed.length} failed — ${first}${res.failed.length > 1 ? ' (first of ' + res.failed.length + ')' : ''}`, { duration: 6000 });
+        }
         setSelectedIds(new Set());
         fetchUsers();
       } else {
