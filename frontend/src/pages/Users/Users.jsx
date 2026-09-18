@@ -18,7 +18,11 @@ import {
   Clock,
   BookOpen,
   ArrowRight,
-  Download
+  Download,
+  Ban,
+  PlayCircle,
+  UserX,
+  AlertTriangle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'react-hot-toast';
@@ -147,6 +151,62 @@ export default function UsersPage() {
       }
     } catch {
       toast.error('Failed to toggle verification');
+    } finally {
+      setIsActionLoading(false);
+    }
+  };
+
+  // Ban / suspend / restore. Mirrors setAccountStatus guards: admins and
+  // self are refused server-side; the UI hides the controls for them too.
+  const handleSetStatus = async (userId, status, reason = '') => {
+    setIsActionLoading(true);
+    try {
+      const res = await adminAPI.put(`/users/${userId}/status`, { status, reason });
+      if (res.success) {
+        toast.success(res.message);
+        setUsers(prev => prev.map(u => u._id === userId
+          ? { ...u, accountStatus: status, statusReason: status === 'active' ? '' : reason }
+          : u));
+        if (selectedUser?._id === userId) {
+          setSelectedUser(prev => ({
+            ...prev,
+            accountStatus: status,
+            statusReason: status === 'active' ? '' : reason,
+            statusChangedAt: new Date().toISOString(),
+          }));
+        }
+      }
+    } catch (err) {
+      toast.error(err?.response?.data?.message || 'Failed to update account status');
+    } finally {
+      setIsActionLoading(false);
+    }
+  };
+
+  // Soft delete with typed confirmation. The user keeps their posts and
+  // comments (backend enforces this), but disappears from all lists and
+  // can never log in again.
+  const handleDeleteUser = async (user) => {
+    const typed = window.prompt(
+      `Permanently delete "${user.username}"?\n\n` +
+      `Their ${user.writerStats?.approved ?? 0} published article(s) and comments stay online for the record, ` +
+      `but they are removed from all lists and can never log in again.\n\n` +
+      `Type DELETE to confirm.`
+    );
+    if (typed !== 'DELETE') {
+      if (typed !== null) toast.error('Confirmation did not match — deletion cancelled');
+      return;
+    }
+    setIsActionLoading(true);
+    try {
+      const res = await adminAPI.delete(`/users/${user._id}`);
+      if (res.success) {
+        toast.success(res.message);
+        setSelectedUser(null);
+        setUsers(prev => prev.filter(u => u._id !== user._id));
+      }
+    } catch (err) {
+      toast.error(err?.response?.data?.message || 'Failed to delete user');
     } finally {
       setIsActionLoading(false);
     }
@@ -345,6 +405,16 @@ export default function UsersPage() {
             >
               Writers
             </button>
+            <button
+              onClick={() => setRoleFilter('banned')}
+              className={`px-3 py-1 text-[11px] font-medium rounded-md transition-all ${
+                roleFilter === 'banned'
+                  ? 'bg-white dark:bg-[#1b1b1e] text-neutral-900 dark:text-white shadow-sm'
+                  : 'text-neutral-500 dark:text-neutral-400 hover:text-neutral-750 dark:hover:text-neutral-350'
+              }`}
+            >
+              Restricted
+            </button>
           </div>
 
           {/* Sort By Dropdown */}
@@ -441,6 +511,16 @@ export default function UsersPage() {
                       {user.isAdmin && (
                         <span className="px-1.5 py-0.5 bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/10 rounded text-[9px] font-bold">
                           ADMIN
+                        </span>
+                      )}
+                      {user.accountStatus === 'banned' && (
+                        <span className="px-1.5 py-0.5 bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/10 rounded text-[9px] font-bold">
+                          BANNED
+                        </span>
+                      )}
+                      {user.accountStatus === 'suspended' && (
+                        <span className="px-1.5 py-0.5 bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/10 rounded text-[9px] font-bold">
+                          SUSPENDED
                         </span>
                       )}
                       {user.isVerified ? (
@@ -686,6 +766,37 @@ export default function UsersPage() {
                     )}
                   </div>
                 </div>
+
+                {/* Account moderation status */}
+                {selectedUser.accountStatus && selectedUser.accountStatus !== 'active' && (
+                  <div className={`rounded-xl p-3 space-y-1.5 border ${
+                    selectedUser.accountStatus === 'banned'
+                      ? 'bg-red-500/5 border-red-500/20'
+                      : 'bg-amber-500/5 border-amber-500/20'
+                  }`}>
+                    <div className="flex items-center gap-1.5">
+                      <AlertTriangle size={12} className={selectedUser.accountStatus === 'banned' ? 'text-red-500' : 'text-amber-500'} />
+                      <span className={`text-[10px] font-bold uppercase tracking-wider ${
+                        selectedUser.accountStatus === 'banned' ? 'text-red-600 dark:text-red-400' : 'text-amber-600 dark:text-amber-400'
+                      }`}>
+                        Account {selectedUser.accountStatus}
+                      </span>
+                    </div>
+                    {selectedUser.statusReason && (
+                      <p className="text-[10px] text-neutral-500 dark:text-neutral-400 leading-relaxed">
+                        Reason: {selectedUser.statusReason}
+                      </p>
+                    )}
+                    {selectedUser.statusChangedAt && (
+                      <p className="text-[9px] text-neutral-400">
+                        Changed {new Date(selectedUser.statusChangedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                      </p>
+                    )}
+                    <p className="text-[9px] text-neutral-400 leading-relaxed">
+                      They cannot log in, and token refreshes are rejected — the block lands within ~15 minutes even with an open session.
+                    </p>
+                  </div>
+                )}
               </div>
 
               {/* Administrative actions in footer drawer */}
@@ -733,6 +844,81 @@ export default function UsersPage() {
                     )}
                   </button>
                 </div>
+
+                {/* Moderation row — hidden for admins (backend refuses them) */}
+                {!selectedUser.isAdmin && (
+                  <div className="grid grid-cols-2 gap-3">
+                    {selectedUser.accountStatus === 'active' ? (
+                      <>
+                        <button
+                          onClick={() => {
+                            const reason = window.prompt(`Suspend "${selectedUser.username}"?\nThey cannot log in until you restore access.\n\nReason (shown to you in the activity log, optional):`);
+                            if (reason === null) return;
+                            handleSetStatus(selectedUser._id, 'suspended', reason);
+                          }}
+                          disabled={isActionLoading}
+                          className="py-2 px-3 border border-amber-500/30 rounded-lg text-xs font-semibold text-amber-600 dark:text-amber-400 bg-amber-500/5 hover:bg-amber-500/10 disabled:opacity-40 shadow-sm transition-all flex items-center justify-center gap-1.5"
+                          title="Temporarily block login — reversible"
+                        >
+                          <Clock size={12} />
+                          Suspend
+                        </button>
+                        <button
+                          onClick={() => {
+                            const reason = window.prompt(`Ban "${selectedUser.username}" permanently?\nThey can never log in again with this account.\n\nReason (optional):`);
+                            if (reason === null) return;
+                            handleSetStatus(selectedUser._id, 'banned', reason);
+                          }}
+                          disabled={isActionLoading}
+                          className="py-2 px-3 border border-red-500/30 rounded-lg text-xs font-semibold text-red-600 dark:text-red-400 bg-red-500/5 hover:bg-red-500/10 disabled:opacity-40 shadow-sm transition-all flex items-center justify-center gap-1.5"
+                          title="Permanently block login"
+                        >
+                          <Ban size={12} />
+                          Ban
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <button
+                          onClick={() => handleSetStatus(selectedUser._id, 'active')}
+                          disabled={isActionLoading}
+                          className="py-2 px-3 border border-emerald-500/30 rounded-lg text-xs font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-500/5 hover:bg-emerald-500/10 disabled:opacity-40 shadow-sm transition-all flex items-center justify-center gap-1.5"
+                          title="Restore login access"
+                        >
+                          <PlayCircle size={12} />
+                          Restore Access
+                        </button>
+                        {selectedUser.accountStatus === 'suspended' && (
+                          <button
+                            onClick={() => {
+                              const reason = window.prompt(`Ban "${selectedUser.username}" permanently?\n\nReason (optional):`);
+                              if (reason === null) return;
+                              handleSetStatus(selectedUser._id, 'banned', reason);
+                            }}
+                            disabled={isActionLoading}
+                            className="py-2 px-3 border border-red-500/30 rounded-lg text-xs font-semibold text-red-600 dark:text-red-400 bg-red-500/5 hover:bg-red-500/10 disabled:opacity-40 shadow-sm transition-all flex items-center justify-center gap-1.5"
+                          >
+                            <Ban size={12} />
+                            Ban
+                          </button>
+                        )}
+                      </>
+                    )}
+                  </div>
+                )}
+
+                {/* Delete — the destructive action lives alone, last */}
+                {!selectedUser.isAdmin && (
+                  <button
+                    onClick={() => handleDeleteUser(selectedUser)}
+                    disabled={isActionLoading}
+                    className="w-full py-2 px-3 rounded-lg text-xs font-semibold text-neutral-500 dark:text-neutral-450 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-500/5 border border-transparent hover:border-red-500/20 disabled:opacity-40 transition-all flex items-center justify-center gap-1.5"
+                    title="Remove from all lists and block login; posts and comments are kept"
+                  >
+                    <UserX size={12} />
+                    Delete Account
+                  </button>
+                )}
               </div>
             </motion.div>
           </>

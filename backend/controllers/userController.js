@@ -1,5 +1,6 @@
 const User = require('../models/User');
 const BlogSubmission = require('../models/BlogSubmission');
+const Comment = require('../models/Comment');
 const { logAction } = require('./activityLogController');
 
 exports.listUsers = async (req, res) => {
@@ -9,7 +10,7 @@ exports.listUsers = async (req, res) => {
     const search = (req.query.search || '').trim();
     const role = req.query.role || 'all'; // 'all' | 'admins' | 'verified' | 'writers'
 
-    const query = {};
+    const query = { deleted: { $ne: true } };
     if (search) {
       const escaped = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       query.$or = [
@@ -19,7 +20,9 @@ exports.listUsers = async (req, res) => {
     }
 
     // Filter by role
-    if (role === 'admins') {
+    if (role === 'banned') {
+      query.accountStatus = { $in: ['banned', 'suspended'] };
+    } else if (role === 'admins') {
       query.isAdmin = true;
     } else if (role === 'verified') {
       query.isVerified = true;
@@ -90,16 +93,15 @@ exports.listUsers = async (req, res) => {
 
 exports.getUserById = async (req, res) => {
   try {
-    const user = await User.findById(req.params.id)
-      .select('-password -verificationToken -verificationTokenExpires -resetPasswordToken -resetPasswordExpires -refreshTokens')
-      .lean();
-    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
-
-    const [approved, rejected, pending] = await Promise.all([
-      BlogSubmission.countDocuments({ 'author.userId': user._id, status: 'approved' }),
-      BlogSubmission.countDocuments({ 'author.userId': user._id, status: 'rejected' }),
-      BlogSubmission.countDocuments({ 'author.userId': user._id, status: 'pending' }),
+    const [user, approved, rejected, pending] = await Promise.all([
+      User.findById(req.params.id)
+        .select('-password -verificationToken -verificationTokenExpires -resetPasswordToken -resetPasswordExpires -refreshTokens')
+        .lean(),
+      BlogSubmission.countDocuments({ 'author.userId': req.params.id, status: 'approved' }),
+      BlogSubmission.countDocuments({ 'author.userId': req.params.id, status: 'rejected' }),
+      BlogSubmission.countDocuments({ 'author.userId': req.params.id, status: 'pending' }),
     ]);
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
     // Tier rules MUST match Phase2 backend/src/modules/blogs/writerTrust.js
     let tier = approved >= 5 ? 'trusted' : approved >= 2 ? 'verified' : 'new';
     if (user.writerDemoted) tier = 'new';
@@ -151,7 +153,6 @@ exports.setWriterTier = async (req, res) => {
     if (user.isAdmin) {
       return res.status(400).json({ success: false, message: 'Admins do not have writer tiers' });
     }
-
     user.writerTierOverride = tier;
     if (clearDemotion) user.writerDemoted = false;
     await user.save();
@@ -266,6 +267,123 @@ exports.getWriterStats = async (req, res) => {
         demoted: !!user?.writerDemoted,
         override: user?.writerTierOverride || null,
       },
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * PUT /users/:id/status
+ * Ban or suspend an account. Phase2's auth layer checks accountStatus on
+ * every login AND every token refresh, so bans take effect within minutes
+ * even for users with valid sessions (JWTs expire after 15 minutes).
+ * Body: { status: 'banned' | 'suspended' | 'active', reason?: string }
+ */
+exports.setAccountStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status, reason } = req.body;
+
+    const VALID = ['active', 'suspended', 'banned'];
+    if (!VALID.includes(status)) {
+      return res.status(400).json({ success: false, message: 'status must be active, suspended, or banned' });
+    }
+
+    const user = await User.findById(id);
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+    if (user.isAdmin) {
+      return res.status(400).json({ success: false, message: 'Admin accounts cannot be banned or suspended — revoke admin first if needed' });
+    }
+    if (user._id.equals(req.admin.id)) {
+      return res.status(400).json({ success: false, message: 'You cannot change your own account status' });
+    }
+
+    user.accountStatus = status;
+    user.statusReason = status === 'active' ? '' : String(reason || '').slice(0, 300);
+    user.statusChangedAt = new Date();
+    await user.save();
+
+    logAction({
+      adminId: req.admin.id,
+      adminName: req.admin.username || req.admin.id,
+      action: 'set_account_status',
+      description: `${status === 'active' ? 'Restored access for' : status === 'banned' ? 'Banned' : 'Suspended'} "${user.username}"${status !== 'active' && user.statusReason ? ` — reason: ${user.statusReason}` : ''}`,
+      targetId: id,
+      targetType: 'user',
+      metadata: { status, reason: user.statusReason },
+    });
+
+    res.json({
+      success: true,
+      message: status === 'active'
+        ? `Access restored for ${user.username}`
+        : `${user.username} is now ${status}`,
+      accountStatus: user.accountStatus,
+      statusReason: user.statusReason,
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * DELETE /users/:id
+ * Soft-delete a user account. The document is kept (blog submissions and
+ * comments keep their author references and stats) but the user vanishes
+ * from every list and can never log in again.
+ * Refuses: admins, already-deleted users, and self-delete.
+ * Anonymous orphan comments (userId with no author name) are blanked so
+ * they show as [deleted user].
+ */
+exports.deleteUser = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const user = await User.findById(id);
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+    if (user.isAdmin) {
+      return res.status(400).json({ success: false, message: 'Admin accounts cannot be deleted — revoke admin first if needed' });
+    }
+    if (user._id.equals(req.admin.id)) {
+      return res.status(400).json({ success: false, message: 'You cannot delete your own account' });
+    }
+    if (user.deleted) {
+      return res.status(400).json({ success: false, message: 'User is already deleted' });
+    }
+
+    const [submissions, comments] = await Promise.all([
+      BlogSubmission.countDocuments({ 'author.userId': id }),
+      Comment.countDocuments({ userId: id, isDeleted: { $ne: true } }),
+    ]);
+
+    user.deleted = true;
+    user.deletedAt = new Date();
+    user.accountStatus = 'banned';
+    user.statusReason = user.statusReason || 'Account deleted by admin';
+    user.refreshTokens = [];
+    await user.save();
+
+    // Their anonymous comments lose the author linkage — content stays for
+    // thread integrity but shows as removed-user rather than a live account.
+    await Comment.updateMany(
+      { userId: id, $or: [{ name: { $exists: false } }, { name: null }, { name: '' }] },
+      { $set: { name: '[deleted user]' } }
+    );
+
+    logAction({
+      adminId: req.admin.id,
+      adminName: req.admin.username || req.admin.id,
+      action: 'delete_user',
+      description: `Soft-deleted account "${user.username}" (${submissions} blog submissions, ${comments} comments kept for record)`,
+      targetId: id,
+      targetType: 'user',
+      metadata: { username: user.username, submissions, comments },
+    });
+
+    res.json({
+      success: true,
+      message: `${user.username} deleted. Their ${submissions} blog submission(s) and ${comments} comment(s) remain for the record.`,
     });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });

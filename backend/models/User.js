@@ -71,11 +71,38 @@ const userSchema = new mongoose.Schema({
     enum: ['new', 'verified', 'trusted', ''],
     default: '',
   },
-  // Set when a writer is demoted (e.g. repeated rejections). Their posts go
+  // When true, the writer was demoted (e.g. repeated rejections). Their posts go
   // to review regardless of tier until cleared.
   writerDemoted: {
     type: Boolean,
     default: false,
+  },
+  // ── Account moderation (written here, enforced by Phase2 auth) ──
+  // banned: cannot log in at all. suspended: temporarily locked out.
+  // Phase2's login/refresh/submission flows check this on every request.
+  accountStatus: {
+    type: String,
+    enum: ['active', 'suspended', 'banned'],
+    default: 'active',
+  },
+  statusReason: {
+    type: String,
+    default: '',
+    maxlength: 300,
+  },
+  statusChangedAt: {
+    type: Date,
+    default: null,
+  },
+  // Soft delete — keeps blog submissions/comments intact while removing the
+  // person from every user list and blocking all login.
+  deleted: {
+    type: Boolean,
+    default: false,
+  },
+  deletedAt: {
+    type: Date,
+    default: null,
   },
   verificationToken: String,
   verificationTokenExpires: Date,
