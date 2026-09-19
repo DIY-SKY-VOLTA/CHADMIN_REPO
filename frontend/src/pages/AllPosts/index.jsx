@@ -16,12 +16,14 @@ import {
   List,
   CheckSquare,
   Square,
-  Loader2
+  Loader2,
+  Trash2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'react-hot-toast';
 import adminAPI from '@/api/adminAPI';
+import ConfirmDialog from '@/components/UI/ConfirmDialog';
 
 const statusConfig = {
   pending: { color: 'text-amber-600 dark:text-amber-500', bg: 'bg-amber-50 dark:bg-amber-500/10 border-amber-200 dark:border-amber-500/20', label: 'Pending', icon: Clock },
@@ -41,6 +43,10 @@ const AllPosts = () => {
   const [stats, setStats] = useState(null);
   const [selectedIds, setSelectedIds] = useState([]);
   const [isBatchProcessing, setIsBatchProcessing] = useState(false);
+  // Pending permanent delete — { mode: 'single'|'bulk', id?, title?, count? }
+  // renders the typed-confirmation dialog instead of deleting outright.
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [isDeleting, setIsDeleting] = useState(false);
   const navigate = useNavigate();
 
   const fetchAllPosts = async (page = pagination.page, status = statusFilter, search = searchQuery) => {
@@ -132,6 +138,35 @@ const AllPosts = () => {
       toast.error(`Batch ${action} failed`);
     } finally {
       setIsBatchProcessing(false);
+    }
+  };
+
+  // Permanent delete — wipes records from MongoDB outright (test drafts,
+  // rejected junk). Bulk mode refuses approved/live posts server-side and
+  // reports what was skipped. adminAPI's interceptor rejects with the
+  // response body, so the server's reason is at err.message directly.
+  const handleDeleteConfirmed = async () => {
+    if (!deleteTarget) return;
+    setIsDeleting(true);
+    try {
+      if (deleteTarget.mode === 'bulk') {
+        const res = await adminAPI.post('/blogs/submissions/batch-delete', { ids: selectedIds });
+        toast.success(res.message || 'Submissions permanently deleted');
+        if (res.skipped?.length) {
+          toast(`${res.skipped.length} approved post(s) skipped — unpublish them from Live Posts first`, { icon: '⚠️', duration: 6000 });
+        }
+        setSelectedIds([]);
+      } else {
+        const res = await adminAPI.delete(`/blogs/submissions/${deleteTarget.id}`);
+        toast.success(res.message || 'Submission permanently deleted');
+      }
+      setDeleteTarget(null);
+      fetchAllPosts(pagination.page, statusFilter, searchQuery);
+      fetchStats();
+    } catch (err) {
+      toast.error(err?.message || 'Delete failed');
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -241,6 +276,16 @@ const AllPosts = () => {
             >
               {isBatchProcessing ? <Loader2 size={11} className="animate-spin" /> : <XCircle size={11} />}
               Reject All
+            </button>
+            {/* Permanent bulk delete — destructive, lives last */}
+            <button
+              onClick={() => setDeleteTarget({ mode: 'bulk', count: selectedIds.length })}
+              disabled={isBatchProcessing || isDeleting}
+              className="px-3 py-1.5 border border-red-500/30 text-red-600 dark:text-red-400 hover:bg-red-500/10 rounded-lg text-[10px] font-bold uppercase flex items-center gap-1.5 transition-colors disabled:opacity-50"
+              title="Permanently remove selected submissions from the database"
+            >
+              {isDeleting ? <Loader2 size={11} className="animate-spin" /> : <Trash2 size={11} />}
+              Delete Forever
             </button>
           </div>
         </div>
@@ -495,6 +540,15 @@ const AllPosts = () => {
                             >
                               <ArrowRight size={12} />
                             </button>
+                            {/* Permanent delete — destructive, lives last */}
+                            <button
+                              onClick={() => setDeleteTarget({ mode: 'single', id: item._id, title: item.title })}
+                              disabled={isDeleting}
+                              className="p-1.5 rounded-lg border border-red-500/25 text-red-500 dark:text-red-400 hover:bg-red-500/10 transition-all shadow-sm disabled:opacity-40"
+                              title="Permanently delete this submission"
+                            >
+                              <Trash2 size={12} />
+                            </button>
                           </div>
                         </td>
                       </tr>
@@ -607,6 +661,26 @@ const AllPosts = () => {
           </button>
         </div>
       </div>
+
+      {/* Permanent delete confirmation — requires typing DELETE */}
+      <ConfirmDialog
+        open={!!deleteTarget}
+        onClose={() => { if (!isDeleting) setDeleteTarget(null); }}
+        onConfirm={handleDeleteConfirmed}
+        title={deleteTarget?.mode === 'bulk'
+          ? `Permanently delete ${deleteTarget.count} submission(s)?`
+          : deleteTarget ? `Permanently delete "${deleteTarget.title}"?` : ''}
+        intent="danger"
+        actionIcon="delete"
+        confirmLabel="Delete forever"
+        requireText="DELETE"
+        busy={isDeleting}
+      >
+        {deleteTarget?.mode === 'bulk'
+          ? <>Selected drafts, pending, and rejected posts are wiped from the database for good — no undo. Approved/live posts are skipped; unpublish those from Live Posts first.</>
+          : <>This wipes the submission and its content from the database for good — no undo, no trash. If it was already approved, the live copy is removed too.</>}
+      </ConfirmDialog>
+
     </div>
   );
 };

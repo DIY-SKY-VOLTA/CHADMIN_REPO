@@ -8,12 +8,15 @@ import {
   Search,
   BookOpen,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  Trash2,
+  Loader2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'react-hot-toast';
 import adminAPI from '@/api/adminAPI';
+import ConfirmDialog from '@/components/UI/ConfirmDialog';
 
 const getStatusConfig = (status) => ({
   pending:   { label: 'Pending',   icon: Clock,        color: '#d97706', bg: 'bg-amber-50 dark:bg-amber-500/10 border-amber-200 dark:border-amber-500/20' },
@@ -46,6 +49,9 @@ const EditorialList = () => {
   const [expandedId, setExpandedId] = useState(null);
   const [page, setPage] = useState(1);
   const [pagination, setPagination] = useState(null);
+  // Pending permanent delete — { _id, title } renders the typed-confirmation dialog
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [isDeleting, setIsDeleting] = useState(false);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -89,6 +95,26 @@ const EditorialList = () => {
       fetchSubmissions();
     } catch {
       toast.error('Action failed');
+    }
+  };
+
+  // Permanent delete — wipes the MongoDB record outright (test drafts and
+  // rejected junk). The backend refuses approved/live posts; unpublish those
+  // from Live Posts first. adminAPI's interceptor rejects with the response
+  // body, so the server's reason is at err.message directly.
+  const handleDeleteSubmission = async () => {
+    if (!deleteTarget) return;
+    setIsDeleting(true);
+    try {
+      const res = await adminAPI.delete(`/blogs/submissions/${deleteTarget._id}`);
+      toast.success(res.message || 'Submission permanently deleted');
+      setDeleteTarget(null);
+      setExpandedId(null);
+      fetchSubmissions();
+    } catch (err) {
+      toast.error(err?.message || 'Delete failed');
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -293,6 +319,17 @@ const EditorialList = () => {
                                     </button>
                                   </>
                                 )}
+
+                                {/* Permanent delete — destructive, lives last */}
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); setDeleteTarget({ _id: item._id, title: item.title }); }}
+                                  disabled={isDeleting}
+                                  className="px-3.5 py-1.5 text-[10px] font-bold uppercase border border-red-500/30 text-red-600 dark:text-red-400 hover:bg-red-500/10 rounded-lg flex items-center gap-1.5 transition-colors disabled:opacity-40 ml-auto"
+                                  title="Permanently remove this submission from the database"
+                                >
+                                  {isDeleting ? <Loader2 size={11} className="animate-spin" /> : <Trash2 size={11} />}
+                                  Delete
+                                </button>
                               </div>
                             </div>
                           </motion.div>
@@ -333,6 +370,21 @@ const EditorialList = () => {
           </>
         )}
       </div>
+
+      {/* Permanent delete confirmation — requires typing DELETE */}
+      <ConfirmDialog
+        open={!!deleteTarget}
+        onClose={() => { if (!isDeleting) setDeleteTarget(null); }}
+        onConfirm={handleDeleteSubmission}
+        title={deleteTarget ? `Permanently delete "${deleteTarget.title}"?` : ''}
+        intent="danger"
+        actionIcon="delete"
+        confirmLabel="Delete forever"
+        requireText="DELETE"
+        busy={isDeleting}
+      >
+        This wipes the submission and its content from the database for good — no undo, no trash. If it was already approved, the live copy is removed too.
+      </ConfirmDialog>
 
     </div>
   );

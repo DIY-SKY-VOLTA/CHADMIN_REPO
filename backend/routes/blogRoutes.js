@@ -18,11 +18,15 @@ router.get('/submissions/:id', blogController.getSubmissionById);
 router.post('/submissions/:id/save', blogController.saveEdits);
 router.post('/submissions/:id/approve', blogController.approveBlog);
 router.post('/submissions/:id/reject', blogController.rejectBlog);
+router.delete('/submissions/:id', blogController.deleteSubmission);
 
 // All submissions with filtering and pagination
 router.get('/all', blogController.getAllSubmissions);
 
 // Batch action (approve/reject multiple submissions)
 router.post('/submissions/batch', blogController.batchAction);
+
+// Batch permanent delete (pending/rejected/draft only)
+router.post('/submissions/batch-delete', blogController.batchDeleteSubmissions);
 
 module.exports = router;

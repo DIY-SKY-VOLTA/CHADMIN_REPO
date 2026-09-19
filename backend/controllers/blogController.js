@@ -1,5 +1,5 @@
 const BlogSubmission = require('../models/BlogSubmission');
-const { publishToSanity } = require('../utils/sanityPublisher');
+const { publishToSanity, deleteSanityPost } = require('../utils/sanityPublisher');
 const { logAction } = require('./activityLogController');
 
 exports.getPendingSubmissions = async (req, res) => {
@@ -384,6 +384,104 @@ exports.getAllSubmissions = async (req, res) => {
         total,
         pages: Math.ceil(total / parseInt(limit)),
       },
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * DELETE /blogs/submissions/:id
+ * Permanently removes a submission from MongoDB. Test drafts and rejected
+ * junk have nothing worth keeping, so there is no soft-delete layer here.
+ * If the post was already published to Sanity, the live copy is removed too
+ * so the queue and the public site can't drift apart. Every deletion is
+ * activity-logged with title/author so accidents are traceable.
+ */
+exports.deleteSubmission = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const blog = await BlogSubmission.findById(id);
+    if (!blog) return res.status(404).json({ success: false, message: 'Submission not found' });
+
+    // Keep the public site consistent: an approved post lives in Sanity,
+    // so its live copy must die with the local record. A Sanity failure is
+    // logged but does NOT block the local delete — the dashboard record is
+    // the source of truth and the orphan can be cleaned up in Sanity Studio.
+    if (blog.sanityId) {
+      try {
+        await deleteSanityPost(blog.sanityId);
+      } catch (sanityErr) {
+        console.error(`Failed to delete Sanity post ${blog.sanityId}: ${sanityErr.message}`);
+      }
+    }
+
+    await BlogSubmission.findByIdAndDelete(id);
+
+    logAction({
+      adminId: req.admin.id,
+      adminName: req.admin.username || req.admin.id,
+      action: 'delete_submission',
+      description: `Permanently deleted blog submission: "${blog.title}" by ${blog.author?.name || 'unknown author'}${blog.sanityId ? ' (also removed from Sanity)' : ''}`,
+      targetId: id,
+      targetType: 'blog',
+      metadata: { title: blog.title, author: blog.author?.name, status: blog.status, hadSanityCopy: !!blog.sanityId },
+    });
+
+    res.json({
+      success: true,
+      message: `"${blog.title}" permanently deleted${blog.sanityId ? ' (live Sanity copy removed too)' : ''}`,
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * POST /blogs/submissions/batch-delete
+ * Bulk permanent delete for clearing out test drafts in one shot.
+ * Only pending/rejected submissions are deletable — approved posts are live
+ * on the public site and must be unpublished first (publishedController).
+ * Body: { ids: string[] }
+ */
+exports.batchDeleteSubmissions = async (req, res) => {
+  try {
+    const { ids } = req.body;
+
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ success: false, message: 'ids must be a non-empty array' });
+    }
+    if (ids.length > 100) {
+      return res.status(400).json({ success: false, message: 'Batch delete is capped at 100 submissions per call' });
+    }
+
+    // Non-deletable (approved/live) ids are reported back, not silently skipped
+    const liveDocs = await BlogSubmission.find({ _id: { $in: ids }, status: 'approved' }).select('title').lean();
+    const deletableIds = ids.filter(id => !liveDocs.some(d => String(d._id) === String(id)));
+
+    const result = await BlogSubmission.deleteMany({
+      _id: { $in: deletableIds },
+      status: { $in: ['pending', 'pending review', 'rejected', 'draft'] },
+    });
+
+    if (result.deletedCount > 0) {
+      logAction({
+        adminId: req.admin.id,
+        adminName: req.admin.username || req.admin.id,
+        action: 'batch_delete_submissions',
+        description: `Batch delete: permanently removed ${result.deletedCount} blog submission(s)`,
+        targetId: null,
+        targetType: null,
+        metadata: { count: result.deletedCount, ids: deletableIds },
+      });
+    }
+
+    res.json({
+      success: true,
+      message: `${result.deletedCount} submission(s) permanently deleted`,
+      deletedCount: result.deletedCount,
+      skipped: liveDocs.map(d => ({ id: String(d._id), title: d.title, reason: 'approved/live — unpublish first' })),
     });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
