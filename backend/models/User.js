@@ -279,11 +279,13 @@ const userSchema = new mongoose.Schema({
 /**
  * Pre-save hook to hash password before storing
  * Only runs if password is modified
+ * Mongoose 9: async pre hooks should NOT call next() — just return
+ * (the old next() call threw "next is not a function" on every save,
+ * breaking delete/ban/suspend/tier in the admin dashboard)
  */
-userSchema.pre("save", async function (next) {
-  if (!this.isModified("password")) return next();
+userSchema.pre("save", async function () {
+  if (!this.isModified("password")) return;
   this.password = await bcrypt.hash(this.password, 12);
-  next();
 });
 
 /**
