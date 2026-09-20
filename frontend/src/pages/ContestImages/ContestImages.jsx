@@ -24,6 +24,8 @@ import {
   CloudDownload,
   Copy,
   Check,
+  CheckCheck,
+  SkipForward,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'react-hot-toast';
@@ -144,10 +146,17 @@ const ContestImages = () => {
   const [uploadTarget, setUploadTarget] = useState(null); // contest being uploaded for
   const [uploadFile, setUploadFile] = useState(null);
   const [uploadPreview, setUploadPreview] = useState(null);
-  const [isUploading, setIsUploading] = useState(false);
   const [contestDetails, setContestDetails] = useState(null);
   const [isLoadingDetails, setIsLoadingDetails] = useState(false);
   const fileInputRef = useRef(null);
+
+  // Background upload queue — submissions return instantly and run in the
+  // background so the admin can keep hunting the next image mid-upload.
+  const [uploadQueue, setUploadQueue] = useState([]); // [{ id, contestId, title, status: 'active'|'done'|'failed', message }]
+  const [queueOpen, setQueueOpen] = useState(true);
+  const queueActiveCount = uploadQueue.filter(j => j.status === 'active').length;
+  const queueDoneCount = uploadQueue.filter(j => j.status === 'done').length;
+  const queueFailedCount = uploadQueue.filter(j => j.status === 'failed').length;
 
   // Set indeterminate state on the select-all header checkbox when only some
   // contests on the current page are selected.
@@ -166,6 +175,15 @@ const ContestImages = () => {
 
   const searchTimerRef = useRef(null);
   const recheckTimerRef = useRef(null);
+
+  // Prune finished jobs from the pill once nothing is active and the user has
+  // seen the outcome (10s after completion).
+  useEffect(() => {
+    if (uploadQueue.length > 0 && queueActiveCount === 0) {
+      const t = setTimeout(() => setUploadQueue([]), 10000);
+      return () => clearTimeout(t);
+    }
+  }, [uploadQueue, queueActiveCount]);
 
   // Cleanup timers on unmount
   useEffect(() => {
@@ -484,45 +502,120 @@ const ContestImages = () => {
     setIsDragOver(false);
   };
 
-  // Handle upload submission — file OR URL source
-  const handleUploadSubmit = async () => {
+  // Push a job onto the background queue and fire the request without
+  // awaiting the result in the UI — the modal is free immediately.
+  const startUploadJob = (contest, payload) => {
+    const jobId = `${contest.id}-${Date.now()}`;
+    setUploadQueue(q => [...q, { id: jobId, contestId: contest.id, title: contest.title, status: 'active', message: 'Uploading…' }]);
+
+    payload
+      .then(res => {
+        if (res?.success) {
+          setUploadQueue(q => q.map(j => j.id === jobId ? { ...j, status: 'done', message: 'Replaced' } : j));
+          toast.success(`Image replaced: ${contest.title}`);
+          // Repair the row in place — no list refresh, no lost scroll/filter state
+          applyRepairedImage(contest.id, res.image);
+        } else {
+          setUploadQueue(q => q.map(j => j.id === jobId ? { ...j, status: 'failed', message: res?.message || 'Upload failed' } : j));
+          toast.error(`${contest.title}: ${res?.message || 'Upload failed'}`);
+        }
+      })
+      .catch(err => {
+        setUploadQueue(q => q.map(j => j.id === jobId ? { ...j, status: 'failed', message: err?.message || 'Upload failed' } : j));
+        toast.error(`${contest.title}: ${err?.message || 'Upload failed'}`);
+      });
+
+    return jobId;
+  };
+
+  // Patch a contest row + stats locally after a successful background upload.
+  const applyRepairedImage = (contestId, image) => {
+    const newUrl = image?.url;
+    setContests(prev => prev.map(c => {
+      if (c.id !== contestId) return c;
+      return {
+        ...c,
+        imageStatus: 'healthy',
+        image: {
+          ...c.image,
+          primaryUrl: newUrl || c.image?.primaryUrl,
+          backupUrl: newUrl || c.image?.backupUrl,
+          lastCheckedAt: new Date().toISOString(),
+        },
+      };
+    }));
+    // Keep the details slide-over in sync if it's showing this contest
+    setSelectedContest(prev => (prev?.id === contestId
+      ? { ...prev, imageStatus: 'healthy', image: { ...prev.image, primaryUrl: newUrl || prev.image?.primaryUrl, backupUrl: newUrl || prev.image?.backupUrl, lastCheckedAt: new Date().toISOString() } }
+      : prev));
+    // Move one count from broken/no_image into healthy so the cards stay truthful
+    setStats(prev => {
+      const next = { ...prev };
+      if (next.broken > 0) next.broken -= 1; else if (next.no_image > 0) next.no_image -= 1;
+      next.healthy += 1;
+      return next;
+    });
+  };
+
+  // Advance the modal to the next broken contest (Broken filter only).
+  // Skips rows already repaired this session (patched healthy locally) and
+  // wraps around to the top when past the last one.
+  const advanceToNextBroken = (currentTarget) => {
+    if (activeFilter !== 'broken') return null;
+    const broken = contests.filter(c => c.imageStatus === 'broken' || c.imageStatus === 'no_image');
+    const candidates = broken.filter(c => c.id !== currentTarget.id);
+    if (candidates.length === 0) return null;
+    const currentIdx = broken.findIndex(c => c.id === currentTarget.id);
+    const next = candidates.find(c => broken.findIndex(b => b.id === c.id) > currentIdx) || candidates[0];
+    return next;
+  };
+
+  // Handle upload submission — file OR URL source. Submits to the background
+  // queue (non-blocking), then either closes or chains to the next broken.
+  const handleUploadSubmit = async (advance = false) => {
     if (!uploadTarget) return;
     if (uploadMode === 'file' && !uploadFile) return;
     if (uploadMode === 'url' && !isValidHttpUrl(uploadUrl)) return;
 
-    setIsUploading(true);
-    try {
-      let res;
-      if (uploadMode === 'url') {
-        res = await uploadContestImageFromUrl(uploadTarget.id, uploadUrl.trim());
-      } else {
-        const formData = new FormData();
-        formData.append('contestId', uploadTarget.id);
-        formData.append('image', uploadFile);
-        res = await adminAPI.post('/contests/images/upload', formData, {
-          headers: { 'Content-Type': 'multipart/form-data' },
-        });
-      }
+    const target = uploadTarget;
+    let payload;
+    if (uploadMode === 'url') {
+      payload = uploadContestImageFromUrl(target.id, uploadUrl.trim());
+    } else {
+      const formData = new FormData();
+      formData.append('contestId', target.id);
+      formData.append('image', uploadFile);
+      payload = adminAPI.post('/contests/images/upload', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+    }
 
-      if (res.success) {
-        toast.success(
-          uploadMode === 'url'
-            ? 'Image fetched from URL and backed up to R2'
-            : 'Image uploaded and contest updated successfully'
-        );
-        setUploadTarget(null);
-        setUploadFile(null);
-        setUploadPreview(null);
-        setUploadUrl('');
-        setUploadMode('file');
-        setUrlPreviewError(false);
-        setContestDetails(null);
-        fetchContests(true);
+    startUploadJob(target, payload);
+    toast.success(uploadMode === 'url'
+      ? 'Queued — fetching in background. You can keep working.'
+      : 'Queued — uploading in background. You can keep working.');
+
+    // Reset input state (keep the modal open when chaining)
+    if (uploadPreview) URL.revokeObjectURL(uploadPreview);
+    setUploadFile(null);
+    setUploadPreview(null);
+    setUploadUrl('');
+    setUrlPreviewError(false);
+
+    // Save & Next Broken: jump straight to the next broken contest
+    if (advance) {
+      const next = advanceToNextBroken(target);
+      if (next) {
+        handleOpenUpload(next);
+      } else {
+        toast.success('All caught up — no more broken images in this view 🎉');
+        handleCloseUpload();
       }
-    } catch (err) {
-      toast.error(err?.message || 'Upload failed');
-    } finally {
-      setIsUploading(false);
+    } else {
+      handleCloseUpload();
+      // Silent refresh so the table reflects finished uploads soon; background
+      // completions already patch rows in place.
+      setTimeout(() => fetchContests(true), 4000);
     }
   };
 
@@ -538,6 +631,47 @@ const ContestImages = () => {
     setContestDetails(null);
     setIsDragOver(false);
   };
+
+  // Ingest an image file from paste or drag-drop into the upload modal.
+  const ingestImageFile = (file) => {
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      toast.error('Clipboard does not contain an image');
+      return;
+    }
+    if (file.size > 15 * 1024 * 1024) {
+      toast.error('Image must be under 15MB');
+      return;
+    }
+    setUploadMode('file');
+    setUrlPreviewError(false);
+    if (uploadPreview) URL.revokeObjectURL(uploadPreview);
+    setUploadFile(file);
+    setUploadPreview(URL.createObjectURL(file));
+  };
+
+  // While the upload modal is open, an image copied anywhere (right-click →
+  // "Copy image" on the source site) lands as the upload on Ctrl+V.
+  useEffect(() => {
+    if (!uploadTarget) return;
+    const onPaste = (e) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      for (const item of items) {
+        if (item.type.startsWith('image/')) {
+          const file = item.getAsFile();
+          if (file) {
+            e.preventDefault();
+            ingestImageFile(file);
+            toast.success('Image pasted from clipboard');
+          }
+          return;
+        }
+      }
+    };
+    window.addEventListener('paste', onPaste);
+    return () => window.removeEventListener('paste', onPaste);
+  }, [uploadTarget, uploadPreview]);
 
   // Toggle select
   const toggleSelect = (id) => {
@@ -1388,7 +1522,19 @@ const ContestImages = () => {
                 initial={{ opacity: 0, scale: 0.95 }}
                 animate={{ opacity: 1, scale: 1 }}
                 exit={{ opacity: 0, scale: 0.95 }}
-                className="w-full max-w-lg bg-white dark:bg-[#151518] rounded-xl border border-neutral-200/50 dark:border-white/5 p-5 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto custom-scrollbar"
+                onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
+                onDragLeave={(e) => { if (e.currentTarget === e.target) setIsDragOver(false); }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setIsDragOver(false);
+                  const f = e.dataTransfer?.files?.[0];
+                  if (f) ingestImageFile(f);
+                }}
+                className={`w-full max-w-lg bg-white dark:bg-[#151518] rounded-xl border p-5 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto custom-scrollbar transition-colors ${
+                  isDragOver
+                    ? 'border-emerald-500/60 ring-2 ring-emerald-500/20 border-dashed'
+                    : 'border-neutral-200/50 dark:border-white/5'
+                }`}
               >
                 {/* Header */}
                 <div className="flex items-center gap-3">
@@ -1400,7 +1546,7 @@ const ContestImages = () => {
                       Upload Contest Image
                     </h3>
                     <p className="text-[10px] text-neutral-400 mt-0.5">
-                      Upload a file or paste a working image URL from the contest's site
+                      Drop or paste an image (Ctrl+V), upload a file, or paste a URL — uploads run in the background
                     </p>
                   </div>
                 </div>
@@ -1563,6 +1709,12 @@ const ContestImages = () => {
                         type="url"
                         value={uploadUrl}
                         onChange={(e) => { setUploadUrl(e.target.value); setUrlPreviewError(false); }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && isValidHttpUrl(uploadUrl)) {
+                            e.preventDefault();
+                            handleUploadSubmit(activeFilter === 'broken');
+                          }
+                        }}
                         placeholder="https://example.com/contest-image.jpg"
                         className="w-full bg-transparent text-xs text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 focus:outline-none"
                       />
@@ -1609,29 +1761,42 @@ const ContestImages = () => {
                 )}
 
                 {/* Footer Buttons */}
-                <div className="flex gap-3 pt-1">
+                <div className="flex gap-2 pt-1">
                   <button
                     onClick={handleCloseUpload}
-                    className="flex-1 py-2 border border-neutral-200 dark:border-white/5 rounded-lg text-xs font-semibold text-neutral-500 hover:text-neutral-800 dark:hover:text-white bg-white dark:bg-[#18181b] hover:bg-neutral-50 dark:hover:bg-white/5 transition-colors shadow-sm"
+                    className="px-3 py-2 border border-neutral-200 dark:border-white/5 rounded-lg text-xs font-semibold text-neutral-500 hover:text-neutral-800 dark:hover:text-white bg-white dark:bg-[#18181b] hover:bg-neutral-50 dark:hover:bg-white/5 transition-colors shadow-sm"
                   >
                     Cancel
                   </button>
+                  {activeFilter === 'broken' && (
+                    <button
+                      onClick={() => {
+                        const next = advanceToNextBroken(uploadTarget);
+                        if (next) {
+                          handleOpenUpload(next);
+                        } else {
+                          toast.success('No other broken images in this view');
+                          handleCloseUpload();
+                        }
+                      }}
+                      className="px-3 py-2 border border-neutral-200 dark:border-white/5 rounded-lg text-xs font-semibold text-neutral-500 hover:text-neutral-800 dark:hover:text-white bg-white dark:bg-[#18181b] hover:bg-neutral-50 dark:hover:bg-white/5 transition-colors shadow-sm flex items-center gap-1.5"
+                      title="Move to the next broken contest without saving"
+                    >
+                      <SkipForward size={12} />
+                      Skip
+                    </button>
+                  )}
                   <button
-                    onClick={handleUploadSubmit}
-                    disabled={isUploading || (uploadMode === 'file' ? !uploadFile : !isValidHttpUrl(uploadUrl))}
+                    onClick={() => handleUploadSubmit(activeFilter === 'broken')}
+                    disabled={uploadMode === 'file' ? !uploadFile : !isValidHttpUrl(uploadUrl)}
                     className="flex-1 py-2 rounded-lg text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 dark:bg-emerald-600 dark:hover:bg-emerald-500 disabled:opacity-40 transition-all shadow-sm flex items-center justify-center gap-1.5"
                   >
-                    {isUploading ? (
-                      <>
-                        <Loader2 size={12} className="animate-spin" />
-                        {uploadMode === 'url' ? 'Fetching & backing up...' : 'Uploading...'}
-                      </>
-                    ) : (
-                      <>
-                        <Upload size={12} />
-                        {uploadMode === 'url' ? 'Fetch & Backup' : 'Upload & Replace'}
-                      </>
-                    )}
+                    <Upload size={12} />
+                    {activeFilter === 'broken'
+                      ? 'Save & Next Broken'
+                      : uploadMode === 'url'
+                        ? 'Fetch & Backup'
+                        : 'Upload & Replace'}
                   </button>
                 </div>
               </motion.div>
@@ -1639,6 +1804,73 @@ const ContestImages = () => {
           </>
         )}
       </AnimatePresence>
+
+      {/* Background upload queue pill — floats bottom-right while jobs run,
+          visible with or without the modal open. */}
+      {uploadQueue.length > 0 && (
+        <div className="fixed bottom-4 right-4 z-[130]">
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="bg-white dark:bg-[#1b1b1e] rounded-xl border border-neutral-200/60 dark:border-white/10 shadow-2xl overflow-hidden max-w-xs"
+          >
+            <button
+              onClick={() => setQueueOpen(o => !o)}
+              className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-left"
+            >
+              {queueActiveCount > 0 ? (
+                <Loader2 size={14} className="animate-spin text-emerald-600 dark:text-emerald-400 shrink-0" />
+              ) : queueFailedCount > 0 ? (
+                <AlertTriangle size={14} className="text-red-500 shrink-0" />
+              ) : (
+                <CheckCheck size={14} className="text-emerald-600 dark:text-emerald-400 shrink-0" />
+              )}
+              <span className="text-[11px] font-semibold text-neutral-800 dark:text-neutral-100 flex-1">
+                {queueActiveCount > 0
+                  ? `Replacing ${queueActiveCount} image${queueActiveCount > 1 ? 's' : ''}…`
+                  : queueFailedCount > 0
+                    ? `${queueDoneCount} replaced, ${queueFailedCount} failed`
+                    : `${queueDoneCount} image${queueDoneCount > 1 ? 's' : ''} replaced`}
+              </span>
+              {queueFailedCount > 0 && (
+                <span className="px-1.5 py-0.5 rounded-full bg-red-500/10 text-red-600 dark:text-red-400 text-[9px] font-bold">
+                  {queueFailedCount}
+                </span>
+              )}
+              <ChevronRight
+                size={12}
+                className={`text-neutral-400 transition-transform ${queueOpen ? 'rotate-90' : ''}`}
+              />
+            </button>
+            {queueOpen && (
+              <div className="max-h-44 overflow-y-auto custom-scrollbar border-t border-neutral-200/50 dark:border-white/5">
+                {uploadQueue.map(job => (
+                  <div
+                    key={job.id}
+                    className="flex items-center gap-2 px-3.5 py-1.5 border-b border-neutral-100 dark:border-white/5 last:border-0"
+                  >
+                    {job.status === 'active' ? (
+                      <Loader2 size={10} className="animate-spin text-neutral-400 shrink-0" />
+                    ) : job.status === 'done' ? (
+                      <CheckCircle2 size={10} className="text-emerald-500 shrink-0" />
+                    ) : (
+                      <AlertTriangle size={10} className="text-red-500 shrink-0" />
+                    )}
+                    <span className="text-[10px] text-neutral-700 dark:text-neutral-200 truncate flex-1" title={job.title}>
+                      {job.title}
+                    </span>
+                    {job.status === 'failed' && (
+                      <span className="text-[9px] text-red-500 truncate max-w-[100px]" title={job.message}>
+                        {job.message}
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </motion.div>
+        </div>
+      )}
     </div>
   );
 };
