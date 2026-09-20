@@ -411,6 +411,142 @@ exports.deleteUser = async (req, res) => {
 };
 
 /**
+ * GET /users?role=deleted
+ * Lists soft-deleted accounts (newest deletion first) so admins can review,
+ * restore, or permanently remove them (e.g. cleaning out test accounts).
+ */
+exports.listDeletedUsers = async (req, res) => {
+  try {
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 50));
+    const search = (req.query.search || '').trim();
+
+    const query = { deleted: true };
+    if (search) {
+      const escaped = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      query.$or = [
+        { username: { $regex: escaped, $options: 'i' } },
+        { email: { $regex: escaped, $options: 'i' } },
+      ];
+    }
+
+    const [users, total] = await Promise.all([
+      User.find(query)
+        .select('-password -refreshTokens -__v')
+        .sort({ deletedAt: -1, createdAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .lean(),
+      User.countDocuments(query),
+    ]);
+
+    res.json({
+      success: true,
+      users,
+      pagination: { total, page, pages: Math.ceil(total / limit) || 1, limit },
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * POST /users/:id/restore
+ * Undo a soft delete — the account becomes visible and can log in again
+ * (any previous ban still applies and must be lifted separately).
+ */
+exports.restoreUser = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const user = await User.findById(id);
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+    if (!user.deleted) {
+      return res.status(400).json({ success: false, message: 'User is not deleted' });
+    }
+
+    user.deleted = false;
+    user.deletedAt = undefined;
+    await user.save({ validateModifiedOnly: true });
+
+    logAction({
+      adminId: req.admin.id,
+      adminName: req.admin.username || req.admin.id,
+      action: 'restore_user',
+      description: `Restored deleted account "${user.username}"`,
+      targetId: id,
+      targetType: 'user',
+      metadata: { username: user.username },
+    });
+
+    res.json({ success: true, message: `${user.username} restored — the account is active again.` });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * DELETE /users/:id/purge — HARD delete (permanent removal).
+ *
+ * Production flow for cleaning up test accounts: removes the User document
+ * from MongoDB and the user's comments. Guards, in order:
+ *
+ *  - Admin accounts can never be purged (revoke admin first).
+ *  - You cannot purge your own account.
+ *  - Accounts with ANY blog submissions are refused — use soft delete for
+ *    real users; their content history must never be destroyed.
+ *
+ * Soft delete stays the DEFAULT: purge is only reachable from the Deleted
+ * view after an explicit typed confirmation.
+ */
+exports.purgeUser = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const user = await User.findById(id).lean();
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+    if (user.isAdmin) {
+      return res.status(400).json({ success: false, message: 'Admin accounts cannot be purged — revoke admin first if needed' });
+    }
+    if (String(user._id) === String(req.admin.id)) {
+      return res.status(400).json({ success: false, message: 'You cannot purge your own account' });
+    }
+
+    const submissions = await BlogSubmission.countDocuments({ 'author.userId': id });
+    if (submissions > 0) {
+      return res.status(400).json({
+        success: false,
+        message: `${user.username} has ${submissions} blog submission(s) — content-bearing accounts cannot be purged. Use soft delete instead.`,
+      });
+    }
+
+    const comments = await Comment.countDocuments({ userId: id });
+
+    await Promise.all([
+      User.findByIdAndDelete(id),
+      Comment.deleteMany({ userId: id }),
+    ]);
+
+    logAction({
+      adminId: req.admin.id,
+      adminName: req.admin.username || req.admin.id,
+      action: 'purge_user',
+      description: `PERMANENTLY removed account "${user.username}" (${user.email}) and ${comments} comment(s) from the database`,
+      targetId: id,
+      targetType: 'user',
+      metadata: { username: user.username, email: user.email, purgedComments: comments },
+    });
+
+    res.json({
+      success: true,
+      message: `${user.username} permanently removed from the database (${comments} comment(s) deleted).`,
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/**
  * POST /users/:id/logout-all
  * Kick every active session for a user by revoking all refresh tokens.
  * Their current JWT dies within ≤15 minutes (access-token lifetime), so

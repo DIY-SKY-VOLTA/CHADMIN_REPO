@@ -39,6 +39,8 @@ const activityLogSchema = new mongoose.Schema({
       "set_writer_tier",
       "set_account_status",
       "delete_user",
+      "restore_user",
+      "purge_user",
       "logout_all_sessions",
       "bulk_user_action",
     ],

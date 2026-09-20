@@ -22,7 +22,9 @@ import {
   Ban,
   PlayCircle,
   UserX,
-  AlertTriangle
+  AlertTriangle,
+  Trash2,
+  RotateCcw
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'react-hot-toast';
@@ -58,7 +60,7 @@ export default function UsersPage() {
   const [isActionLoading, setIsActionLoading] = useState(false);
 
   // Redesign states
-  const [roleFilter, setRoleFilter] = useState('all'); // 'all' | 'admins' | 'verified' | 'writers' | 'banned'
+  const [roleFilter, setRoleFilter] = useState('all'); // 'all' | 'admins' | 'verified' | 'writers' | 'banned' | 'deleted'
   // Pending confirmation — renders ConfirmDialog instead of native prompt/confirm
   const [dialog, setDialog] = useState(null);
   const [sortBy, setSortBy] = useState('newest'); // 'newest' | 'oldest' | 'alphabetical'
@@ -359,6 +361,67 @@ export default function UsersPage() {
     });
   };
 
+  // Undo a soft delete from the Deleted view — the account becomes active
+  // again (any ban stays and must be lifted separately).
+  const handleRestoreUser = (user) => {
+    setDialog({
+      title: `Restore ${user.username}?`,
+      intent: 'neutral',
+      confirmLabel: 'Restore',
+      body: <>The account becomes visible and active again. Any previous ban remains in place and can be lifted separately.</>,
+      onConfirm: async () => {
+        setIsActionLoading(true);
+        try {
+          const res = await adminAPI.post(`/users/${user._id}/restore`);
+          if (res.success) {
+            toast.success(res.message);
+            setUsers(prev => prev.filter(u => u._id !== user._id));
+          } else {
+            toast.error(res.message || 'Failed to restore user');
+          }
+        } catch (err) {
+          toast.error(apiErrMsg(err, 'Failed to restore user'));
+        } finally {
+          setIsActionLoading(false);
+        }
+      },
+    });
+  };
+
+  // HARD delete — permanently removes a test account from MongoDB. Backend
+  // refuses content-bearing accounts and admins; typed DELETE required.
+  const handlePurgeUser = (user) => {
+    setDialog({
+      title: `Erase ${user.username} from the database forever?`,
+      intent: 'danger', actionIcon: 'delete',
+      confirmLabel: 'Erase forever',
+      requireText: 'ERASE',
+      body: (
+        <>
+          This <strong>cannot be undone</strong>. The account document and its
+          comments are removed from MongoDB. Accounts with blog submissions
+          are refused by the server — those must stay soft-deleted for the record.
+        </>
+      ),
+      onConfirm: async () => {
+        setIsActionLoading(true);
+        try {
+          const res = await adminAPI.delete(`/users/${user._id}/purge`);
+          if (res.success) {
+            toast.success(res.message);
+            setUsers(prev => prev.filter(u => u._id !== user._id));
+          } else {
+            toast.error(res.message || 'Failed to purge user');
+          }
+        } catch (err) {
+          toast.error(apiErrMsg(err, 'Failed to purge user'));
+        } finally {
+          setIsActionLoading(false);
+        }
+      },
+    });
+  };
+
   const openUserDetail = async (user) => {
     try {
       const res = await adminAPI.get(`/users/${user._id}`);
@@ -369,6 +432,7 @@ export default function UsersPage() {
   };
 
   // Sorting (filtering is now done server-side)
+  const isDeletedView = roleFilter === 'deleted';
   const sortedUsers = [...users].sort((a, b) => {
     if (sortBy === 'newest') {
       return new Date(b.createdAt) - new Date(a.createdAt);
@@ -562,6 +626,16 @@ export default function UsersPage() {
             >
               Restricted
             </button>
+            <button
+              onClick={() => setRoleFilter('deleted')}
+              className={`px-3 py-1 text-[11px] font-medium rounded-md transition-all ${
+                roleFilter === 'deleted'
+                  ? 'bg-white dark:bg-[#1b1b1e] text-neutral-900 dark:text-white shadow-sm'
+                  : 'text-neutral-500 dark:text-neutral-400 hover:text-neutral-750 dark:hover:text-neutral-350'
+              }`}
+            >
+              Deleted
+            </button>
           </div>
 
           {/* Sort By Dropdown */}
@@ -663,8 +737,14 @@ export default function UsersPage() {
         ) : users.length === 0 ? (
           <div className="bg-white dark:bg-[#151518]/40 border border-neutral-200/40 dark:border-white/5 rounded-2xl flex flex-col items-center justify-center py-20 shadow-sm">
             <Users size={28} strokeWidth={1.5} className="text-neutral-350 dark:text-neutral-600 mb-3" />
-            <p className="text-xs font-semibold text-neutral-800 dark:text-neutral-300">No users found</p>
-            <p className="text-[11px] text-neutral-400 mt-1">Try adapting your filters or searching another parameter.</p>
+            <p className="text-xs font-semibold text-neutral-800 dark:text-neutral-300">
+              {isDeletedView ? 'No deleted accounts' : 'No users found'}
+            </p>
+            <p className="text-[11px] text-neutral-400 mt-1">
+              {isDeletedView
+                ? 'Soft-deleted accounts appear here — restore them or erase them from the database permanently.'
+                : 'Try adapting your filters or searching another parameter.'}
+            </p>
           </div>
         ) : (
           /* Notion tabular list layout */
@@ -684,7 +764,14 @@ export default function UsersPage() {
                 <div className="w-[32%]">User Details</div>
                 <div className="w-[27%]">Email Address</div>
                 <div className="w-[16%]">Role & Verification</div>
-                <div className="w-[25%] text-right">Date Joined</div>
+                {isDeletedView ? (
+                  <>
+                    <div className="w-[17%]">Deleted On</div>
+                    <div className="w-[8%] text-right">Actions</div>
+                  </>
+                ) : (
+                  <div className="w-[25%] text-right">Date Joined</div>
+                )}
               </div>
 
               {/* Rows */}
@@ -692,14 +779,16 @@ export default function UsersPage() {
                 {sortedUsers.map((user) => (
                   <div
                     key={user._id}
-                    onClick={() => openUserDetail(user)}
-                    className={`px-5 py-3 flex items-center hover:bg-neutral-50 dark:hover:bg-white/5 transition-colors cursor-pointer text-xs text-neutral-700 dark:text-neutral-350 ${
+                    onClick={() => { if (!isDeletedView) openUserDetail(user); }}
+                    className={`px-5 py-3 flex items-center hover:bg-neutral-50 dark:hover:bg-white/5 transition-colors text-xs text-neutral-700 dark:text-neutral-350 ${
+                      isDeletedView ? '' : 'cursor-pointer'
+                    } ${
                       selectedUser?._id === user._id ? 'bg-neutral-100/60 dark:bg-white/5 font-medium' : ''
                     }`}
                   >
                     {/* Bulk-select checkbox — admins are never selectable */}
                     <div className="w-[28px] shrink-0" onClick={(e) => e.stopPropagation()}>
-                      {!user.isAdmin && (
+                      {!user.isAdmin && !isDeletedView && (
                         <input
                           type="checkbox"
                           checked={selectedIds.has(user._id)}
@@ -752,6 +841,11 @@ export default function UsersPage() {
                           SUSPENDED
                         </span>
                       )}
+                      {isDeletedView && (
+                        <span className="px-1.5 py-0.5 bg-neutral-500/10 text-neutral-500 dark:text-neutral-400 border border-neutral-500/10 rounded text-[9px] font-bold">
+                          DELETED
+                        </span>
+                      )}
                       {user.isVerified ? (
                         <BadgeCheck size={14} className="text-emerald-500 shrink-0" title="Email verified" />
                       ) : (
@@ -759,12 +853,42 @@ export default function UsersPage() {
                       )}
                     </div>
 
-                    {/* Joined Date */}
-                    <div className="w-[25%] text-right text-neutral-400 font-medium">
-                      <span className="truncate">
-                        {new Date(user.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                      </span>
-                    </div>
+                    {/* Joined Date — or Deleted On + actions in the Deleted view */}
+                    {isDeletedView ? (
+                      <>
+                        <div className="w-[17%] text-right text-neutral-400 font-medium">
+                          <span className="truncate">
+                            {user.deletedAt
+                              ? new Date(user.deletedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+                              : '—'}
+                          </span>
+                        </div>
+                        <div className="w-[8%] text-right flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
+                          <button
+                            onClick={() => handleRestoreUser(user)}
+                            disabled={isActionLoading}
+                            className="p-1.5 rounded hover:bg-emerald-500/10 text-neutral-500 hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors disabled:opacity-30"
+                            title="Restore this account"
+                          >
+                            <RotateCcw size={13} />
+                          </button>
+                          <button
+                            onClick={() => handlePurgeUser(user)}
+                            disabled={isActionLoading}
+                            className="p-1.5 rounded hover:bg-red-500/10 text-neutral-500 hover:text-red-600 dark:hover:text-red-400 transition-colors disabled:opacity-30"
+                            title="Erase from the database forever (test accounts only)"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="w-[25%] text-right text-neutral-400 font-medium">
+                        <span className="truncate">
+                          {new Date(user.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                        </span>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
