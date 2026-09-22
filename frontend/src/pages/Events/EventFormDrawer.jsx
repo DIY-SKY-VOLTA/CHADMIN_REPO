@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'react-hot-toast';
+import { DateTimePicker } from '@/pages/Contests/contestFormUI';
 import { createEvent, updateEvent } from '@/api/eventAPI';
 import { useNestedForm } from '@/hooks/useNestedForm';
 
@@ -88,12 +89,23 @@ const blankForm = () => ({
 
 const pad = (n) => String(n).padStart(2, '0');
 
+// Stored dates are UTC ISO — display the UTC wall-clock (same convention as
+// ContestForm) so what the admin picks is exactly what gets stored, with no
+// hidden local-timezone conversion. The custom DateTimePicker handles typing
+// ("2026-06-15"), month AND year jumps, and past dates — native
+// datetime-local inputs silently reject typed dates in Chrome, which made
+// deadlines unfixable.
 const toInputDate = (iso) => {
   if (!iso) return '';
-  const d = new Date(iso);
+  const s = String(iso);
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(s)) return s.slice(0, 16);
+  const d = new Date(s);
   if (isNaN(d.getTime())) return '';
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}T${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
 };
+
+// Picker value (YYYY-MM-DDTHH:mm, UTC wall time) → explicit UTC ISO.
+const fromInputDate = (v) => (v ? `${String(v).slice(0, 16)}:00.000Z` : null);
 
 const hydrate = (ev) => ({
   title: ev.title || '',
@@ -149,7 +161,7 @@ const hydrate = (ev) => ({
 // Nested objects become dotted $set paths server-side, so any field this form
 // does not include (coordinates, gallery, eligibility, social links…) is preserved.
 const serialize = (f) => {
-  const iso = (v) => (v ? new Date(v).toISOString() : null);
+  const iso = fromInputDate; // picker values are UTC wall time — append Z
   const list = (v) =>
     v
       .split(',')
@@ -337,7 +349,7 @@ export default function EventFormDrawer({ isOpen, isCreating, eventData, eventTy
             animate={{ x: 0 }}
             exit={{ x: '100%' }}
             transition={{ type: 'spring', damping: 25, stiffness: 220 }}
-            className="fixed inset-y-0 right-0 z-50 w-full max-w-xl bg-white dark:bg-[#151518] border-l border-neutral-200/50 dark:border-white/5 shadow-2xl flex flex-col overflow-hidden text-xs"
+            className="fixed inset-y-0 right-0 z-50 w-full max-w-4xl bg-white dark:bg-[#151518] border-l border-neutral-200/50 dark:border-white/5 shadow-2xl flex flex-col overflow-hidden text-xs"
           >
             {/* Header */}
             <div className="shrink-0 px-5 py-4 border-b border-neutral-200/50 dark:border-white/5 flex items-start justify-between gap-3">
@@ -362,8 +374,9 @@ export default function EventFormDrawer({ isOpen, isCreating, eventData, eventTy
               </button>
             </div>
 
-            {/* Body */}
-            <div className="flex-1 overflow-y-auto custom-scrollbar p-5 space-y-7">
+            {/* Body — two-column grid on wide screens (drawer is max-w-4xl);\n                single column stacks below lg */}
+            <div className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-7">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-8 gap-y-7 items-start">
               {/* Basics */}
               <Section icon={Tag} title="Basics & Status">
                 <Field label="Title *">
@@ -454,10 +467,10 @@ export default function EventFormDrawer({ isOpen, isCreating, eventData, eventTy
               <Section icon={CalendarDays} title="Schedule">
                 <div className="grid grid-cols-2 gap-3">
                   <Field label="Starts">
-                    <input type="datetime-local" value={form.start} onChange={set('start')} className={inputCls} />
+                    <DateTimePicker value={form.start} onChange={set('start')} />
                   </Field>
                   <Field label="Ends">
-                    <input type="datetime-local" value={form.end} onChange={set('end')} className={inputCls} />
+                    <DateTimePicker value={form.end} onChange={set('end')} />
                   </Field>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
@@ -540,10 +553,10 @@ export default function EventFormDrawer({ isOpen, isCreating, eventData, eventTy
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <Field label="Registration Deadline">
-                    <input type="datetime-local" value={form.deadline} onChange={set('deadline')} className={inputCls} />
+                    <DateTimePicker value={form.deadline} onChange={set('deadline')} />
                   </Field>
                   <Field label="Early Bird Deadline">
-                    <input type="datetime-local" value={form.earlyBirdDeadline} onChange={set('earlyBirdDeadline')} className={inputCls} />
+                    <DateTimePicker value={form.earlyBirdDeadline} onChange={set('earlyBirdDeadline')} />
                   </Field>
                 </div>
                 <Field label="Registration URL">
@@ -628,6 +641,7 @@ export default function EventFormDrawer({ isOpen, isCreating, eventData, eventTy
                   </Field>
                 </div>
               </Section>
+              </div>
             </div>
 
             {/* Footer */}
