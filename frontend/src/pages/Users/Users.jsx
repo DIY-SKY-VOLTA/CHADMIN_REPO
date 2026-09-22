@@ -1010,13 +1010,13 @@ export default function UsersPage() {
                 {/* Writer stats metrics grid */}
                 {selectedUser.writerStats && (
                   <div className="space-y-2">
-                    <div className="flex items-center gap-1.5 text-neutral-400 uppercase tracking-wider text-[9px] font-semibold">
-                      <Star size={11} className="text-amber-500" />
+                    <div className="flex items-center gap-1.5 text-neutral-400 uppercase tracking-wider text-[10px] font-semibold">
+                      <Star size={12} className="text-amber-500" />
                       <span>Contribution Stats</span>
                     </div>
                     <div className="bg-neutral-50/50 dark:bg-[#1b1b1e]/30 border border-neutral-200/30 dark:border-white/5 rounded-xl p-3 space-y-3">
-                      <div className="flex justify-between items-center">
-                        <span className="text-[10px] text-neutral-500">Tier Status:</span>
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] text-neutral-500">Tier Status:</span>
                         <span className="flex items-center gap-1.5">
                           {selectedUser.writerStats.demoted && (
                             <span className="px-2 py-0.5 rounded text-[8px] font-bold border text-red-600 dark:text-red-400 bg-red-500/10 border-red-500/10" title="Demoted after repeated rejections — all posts go to review">
@@ -1034,7 +1034,7 @@ export default function UsersPage() {
 
                       {/* Manual tier override control */}
                       <div className="flex items-center justify-between gap-2 pt-1 border-t border-neutral-200/40 dark:border-white/5">
-                        <span className="text-[9px] text-neutral-400 uppercase tracking-wider font-semibold">Admin Override</span>
+                        <span className="text-[10px] text-neutral-400 uppercase tracking-wider font-semibold">Admin Override</span>
                         <div className="flex items-center gap-1">
                           {[['new', 'New'], ['verified', 'Verified'], ['trusted', 'Trusted'], ['', 'Auto']].map(([val, label]) => {
                             const active = (selectedUser.writerStats.override || '') === (val || '')
@@ -1051,7 +1051,7 @@ export default function UsersPage() {
                                     ? 'Clear override — tier computed automatically from approved/rejected history'
                                     : `Force tier: ${tierConfig[val]?.hint}`
                                 }
-                                className={`px-2 py-1 rounded-md text-[9px] font-semibold border transition-all disabled:opacity-40 ${
+                                className={`px-2 py-1 rounded-md text-[10px] font-semibold border transition-all disabled:opacity-40 ${
                                   active
                                     ? 'bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 border-neutral-900 dark:border-white shadow-sm'
                                     : 'bg-white dark:bg-[#151518] text-neutral-500 dark:text-neutral-400 border-neutral-200/60 dark:border-white/10 hover:border-neutral-400 dark:hover:border-neutral-600'
@@ -1066,7 +1066,7 @@ export default function UsersPage() {
                               type="button"
                               disabled={isActionLoading}
                               onClick={() => handleSetTier(selectedUser._id, '', true)}
-                              className="px-2 py-1 rounded-md text-[9px] font-semibold border bg-white dark:bg-[#151518] text-red-500 hover:text-red-600 dark:hover:text-red-400 border-neutral-200/60 dark:border-white/10 hover:border-red-400 transition-all disabled:opacity-40"
+                              className="px-2 py-1 rounded-md text-[10px] font-semibold border bg-white dark:bg-[#151518] text-red-500 hover:text-red-600 dark:hover:text-red-400 border-neutral-200/60 dark:border-white/10 hover:border-red-400 transition-all disabled:opacity-40"
                               title="Clear the rejection demotion — tier returns to the automatic calculation"
                             >
                               Clear Demotion
@@ -1076,16 +1076,16 @@ export default function UsersPage() {
                       </div>
                       <div className="grid grid-cols-3 gap-2 mt-1">
                         <div className="text-center p-1.5 bg-white dark:bg-[#151518] border border-neutral-200/50 dark:border-white/5 rounded-lg shadow-sm">
-                          <p className="text-xs font-bold text-emerald-600 dark:text-emerald-500">{selectedUser.writerStats.approved}</p>
-                          <p className="text-[8px] text-neutral-400 uppercase font-medium mt-0.5">Approved</p>
+                          <p className="text-[13px] font-bold text-emerald-600 dark:text-emerald-500">{selectedUser.writerStats.approved}</p>
+                          <p className="text-[9px] text-neutral-400 uppercase font-medium mt-0.5">Approved</p>
                         </div>
                         <div className="text-center p-1.5 bg-white dark:bg-[#151518] border border-neutral-200/50 dark:border-white/5 rounded-lg shadow-sm">
-                          <p className="text-xs font-bold text-amber-500">{selectedUser.writerStats.pending}</p>
-                          <p className="text-[8px] text-neutral-400 uppercase font-medium mt-0.5">Pending</p>
+                          <p className="text-[13px] font-bold text-amber-500">{selectedUser.writerStats.pending}</p>
+                          <p className="text-[9px] text-neutral-400 uppercase font-medium mt-0.5">Pending</p>
                         </div>
                         <div className="text-center p-1.5 bg-white dark:bg-[#151518] border border-neutral-200/50 dark:border-white/5 rounded-lg shadow-sm">
-                          <p className="text-xs font-bold text-red-500">{selectedUser.writerStats.rejected}</p>
-                          <p className="text-[8px] text-neutral-400 uppercase font-medium mt-0.5">Rejected</p>
+                          <p className="text-[13px] font-bold text-red-500">{selectedUser.writerStats.rejected}</p>
+                          <p className="text-[9px] text-neutral-400 uppercase font-medium mt-0.5">Rejected</p>
                         </div>
                       </div>
                     </div>
@@ -1095,7 +1095,7 @@ export default function UsersPage() {
                 {/* Recent submissions list (Up to 20 recent posts) */}
                 {selectedUser.submissions && selectedUser.submissions.length > 0 && (
                   <div className="space-y-2">
-                    <span className="block text-[9px] font-semibold text-neutral-400 uppercase tracking-wider">
+                    <span className="block text-[10px] font-semibold text-neutral-400 uppercase tracking-wider">
                       Recent Submissions ({selectedUser.submissions.length})
                     </span>
                     <div className="bg-neutral-50/30 dark:bg-[#1b1b1e]/20 border border-neutral-200/35 dark:border-white/5 rounded-xl overflow-hidden max-h-[220px] overflow-y-auto custom-scrollbar">
@@ -1106,11 +1106,11 @@ export default function UsersPage() {
                               <p className="text-[10.5px] font-medium text-neutral-800 dark:text-neutral-200 truncate leading-snug">
                                 {post.title}
                               </p>
-                              <p className="text-[8px] text-neutral-400">
+                              <p className="text-[8.5px] text-neutral-400">
                                 {new Date(post.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                               </p>
                             </div>
-                            <span className={`shrink-0 px-1.5 py-0.5 rounded text-[7px] font-bold ${
+                            <span className={`shrink-0 px-1.5 py-0.5 rounded text-[8px] font-bold ${
                               post.status === 'approved'
                                 ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-500'
                                 : post.status === 'rejected'
@@ -1130,14 +1130,14 @@ export default function UsersPage() {
                 {Array.isArray(selectedUser.sessions) && (
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
-                      <span className="text-[9px] font-semibold text-neutral-400 uppercase tracking-wider">
+                      <span className="text-[10px] font-semibold text-neutral-400 uppercase tracking-wider">
                         Active Sessions ({selectedUser.sessions.length})
                       </span>
                       {selectedUser.sessions.length > 0 && !selectedUser.isAdmin && (
                         <button
                           onClick={() => handleLogoutAll(selectedUser._id)}
                           disabled={isActionLoading}
-                          className="text-[9px] font-semibold text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-40"
+                          className="text-[10px] font-semibold text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-40"
                           title="Revoke all refresh tokens — the user is signed out everywhere within 15 minutes"
                         >
                           Log out everywhere
@@ -1146,18 +1146,18 @@ export default function UsersPage() {
                     </div>
                     <div className="bg-neutral-50/30 dark:bg-[#1b1b1e]/20 border border-neutral-200/35 dark:border-white/5 rounded-xl p-2.5">
                       {selectedUser.sessions.length === 0 ? (
-                        <p className="text-[10px] text-neutral-400 italic">No active sessions</p>
+                        <p className="text-[11px] text-neutral-400 italic">No active sessions</p>
                       ) : (
                         <div className="space-y-1.5">
                           {selectedUser.sessions.map((s, i) => (
-                            <div key={i} className="flex items-center justify-between gap-2 text-[10px]">
+                            <div key={i} className="flex items-center justify-between gap-2 text-[11px]">
                               <span className="text-neutral-600 dark:text-neutral-300 truncate">{s.device}</span>
                               <span className="text-neutral-400 shrink-0">{timeAgo(s.lastUsedAt)}</span>
                             </div>
                           ))}
                         </div>
                       )}
-                      <p className="text-[8.5px] text-neutral-400 mt-2 leading-relaxed">
+                      <p className="text-[10px] text-neutral-400 mt-2 leading-relaxed">
                         Revoking sessions kills refresh tokens; their current access token expires within 15 minutes.
                       </p>
                     </div>
@@ -1167,12 +1167,12 @@ export default function UsersPage() {
                 {/* Admin activity timeline */}
                 {Array.isArray(selectedUser.activity) && (
                   <div className="space-y-2">
-                    <span className="block text-[9px] font-semibold text-neutral-400 uppercase tracking-wider">
+                    <span className="block text-[10px] font-semibold text-neutral-400 uppercase tracking-wider">
                       Admin History
                     </span>
                     {selectedUser.activity.length === 0 ? (
                       <div className="bg-neutral-50/30 dark:bg-[#1b1b1e]/20 border border-neutral-200/35 dark:border-white/5 rounded-xl p-2.5">
-                        <p className="text-[10px] text-neutral-400 italic">No admin actions on this account yet</p>
+                        <p className="text-[11px] text-neutral-400 italic">No admin actions on this account yet</p>
                       </div>
                     ) : (
                       <div className="relative pl-3.5 space-y-2.5">
@@ -1180,8 +1180,8 @@ export default function UsersPage() {
                         {selectedUser.activity.map((log, i) => (
                           <div key={i} className="relative">
                             <span className="absolute -left-[12px] top-1 w-2 h-2 rounded-full bg-neutral-300 dark:bg-neutral-600 border border-white dark:border-[#151518]" />
-                            <p className="text-[10px] text-neutral-700 dark:text-neutral-300 leading-snug">{log.description}</p>
-                            <p className="text-[8.5px] text-neutral-400 mt-0.5">
+                            <p className="text-[11px] text-neutral-700 dark:text-neutral-300 leading-snug">{log.description}</p>
+                            <p className="text-[9.5px] text-neutral-400 mt-0.5">
                               {log.adminName} · {timeAgo(log.createdAt)}
                             </p>
                           </div>
@@ -1193,10 +1193,10 @@ export default function UsersPage() {
 
                 {/* Account details panel */}
                 <div className="space-y-2">
-                  <span className="block text-[9px] font-semibold text-neutral-400 uppercase tracking-wider">
+                  <span className="block text-[10px] font-semibold text-neutral-400 uppercase tracking-wider">
                     Registration Information
                   </span>
-                  <div className="bg-neutral-50/50 dark:bg-[#1b1b1e]/30 border border-neutral-200/30 dark:border-white/5 rounded-xl p-3 space-y-2 text-[10.5px] text-neutral-500 dark:text-neutral-400 font-medium">
+                  <div className="bg-neutral-50/50 dark:bg-[#1b1b1e]/30 border border-neutral-200/30 dark:border-white/5 rounded-xl p-3 space-y-2 text-[11.5px] text-neutral-500 dark:text-neutral-400 font-medium">
                     <div className="flex items-center gap-2">
                       <Mail size={12} className="text-neutral-400 shrink-0" />
                       <span className="truncate">{selectedUser.email}</span>
@@ -1223,28 +1223,28 @@ export default function UsersPage() {
                   }`}>
                     <div className="flex items-center gap-1.5">
                       <AlertTriangle size={12} className={selectedUser.accountStatus === 'banned' || selectedUser.accountStatus === 'deletion_pending' ? 'text-red-500' : 'text-amber-500'} />
-                      <span className={`text-[10px] font-bold uppercase tracking-wider ${
+                      <span className={`text-[11px] font-bold uppercase tracking-wider ${
                         selectedUser.accountStatus === 'banned' || selectedUser.accountStatus === 'deletion_pending' ? 'text-red-600 dark:text-red-400' : 'text-amber-600 dark:text-amber-400'
                       }`}>
                         {selectedUser.accountStatus === 'deletion_pending' ? 'Deletion scheduled' : `Account ${selectedUser.accountStatus}`}
                       </span>
                     </div>
                     {selectedUser.scheduledPurgeAt && (
-                      <p className="text-[10px] text-red-600 dark:text-red-400 leading-relaxed font-medium">
+                      <p className="text-[10.5px] text-red-600 dark:text-red-400 leading-relaxed font-medium">
                         Purge runs {new Date(selectedUser.scheduledPurgeAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} — restoring before then cancels it.
                       </p>
                     )}
                     {selectedUser.statusReason && (
-                      <p className="text-[10px] text-neutral-500 dark:text-neutral-400 leading-relaxed">
+                      <p className="text-[10.5px] text-neutral-500 dark:text-neutral-400 leading-relaxed">
                         Reason: {selectedUser.statusReason}
                       </p>
                     )}
                     {selectedUser.statusChangedAt && (
-                      <p className="text-[9px] text-neutral-400">
+                      <p className="text-[10px] text-neutral-400">
                         Changed {new Date(selectedUser.statusChangedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                       </p>
                     )}
-                    <p className="text-[9px] text-neutral-400 leading-relaxed">
+                    <p className="text-[10px] text-neutral-400 leading-relaxed">
                       {selectedUser.accountStatus === 'deletion_pending'
                         ? 'They cannot log in. At purge: posts erased, comments anonymized, all references cleaned by the main app.'
                         : 'They cannot log in, and every authenticated request is rejected — the block is immediate.'}
@@ -1255,14 +1255,15 @@ export default function UsersPage() {
 
               {/* Administrative actions in footer drawer */}
               <div className="shrink-0 p-4 border-t border-neutral-200/50 dark:border-white/5 bg-neutral-50/50 dark:bg-neutral-900/30 space-y-2.5">
-                <span className="block text-[9px] font-semibold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider">
+                <span className="block text-[10px] font-semibold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider">
                   Admin Control Panel
                 </span>
-                <div className="grid grid-cols-2 gap-3">
+                {/* One grid for every action so widths and gaps always align */}
+                <div className="grid grid-cols-2 gap-2.5">
                   <button
                     onClick={() => handleToggleAdmin(selectedUser._id)}
                     disabled={isActionLoading}
-                    className="flex-1 py-2 px-3 border border-neutral-200/60 dark:border-white/5 rounded-lg text-xs font-semibold text-neutral-700 dark:text-neutral-350 bg-white dark:bg-[#18181b] hover:bg-neutral-50 dark:hover:bg-white/5 disabled:opacity-40 shadow-sm transition-all flex items-center justify-center gap-1.5"
+                    className="w-full py-2.5 px-3 border border-neutral-200/60 dark:border-white/5 rounded-lg text-xs font-semibold text-neutral-700 dark:text-neutral-350 bg-white dark:bg-[#18181b] hover:bg-neutral-50 dark:hover:bg-white/5 disabled:opacity-40 shadow-sm transition-all flex items-center justify-center gap-1.5"
                   >
                     {isActionLoading ? (
                       <Loader2 size={12} className="animate-spin" />
@@ -1281,7 +1282,7 @@ export default function UsersPage() {
                   <button
                     onClick={() => handleToggleVerified(selectedUser._id)}
                     disabled={isActionLoading}
-                    className="flex-1 py-2 px-3 border border-neutral-200/60 dark:border-white/5 rounded-lg text-xs font-semibold text-neutral-700 dark:text-neutral-350 bg-white dark:bg-[#18181b] hover:bg-neutral-50 dark:hover:bg-white/5 disabled:opacity-40 shadow-sm transition-all flex items-center justify-center gap-1.5"
+                    className="w-full py-2.5 px-3 border border-neutral-200/60 dark:border-white/5 rounded-lg text-xs font-semibold text-neutral-700 dark:text-neutral-350 bg-white dark:bg-[#18181b] hover:bg-neutral-50 dark:hover:bg-white/5 disabled:opacity-40 shadow-sm transition-all flex items-center justify-center gap-1.5"
                   >
                     {isActionLoading ? (
                       <Loader2 size={12} className="animate-spin" />
@@ -1299,15 +1300,15 @@ export default function UsersPage() {
                   </button>
                 </div>
 
-                {/* Moderation row — hidden for admins (backend refuses them) */}
+                {/* Moderation actions join the same grid — hidden for admins (backend refuses them) */}
                 {!selectedUser.isAdmin && (
-                  <div className="grid grid-cols-2 gap-3">
+                  <>
                     {selectedUser.accountStatus === 'active' ? (
                       <>
                         <button
                           onClick={() => openStatusDialog(selectedUser, 'suspended')}
                           disabled={isActionLoading}
-                          className="py-2 px-3 border border-amber-500/30 rounded-lg text-xs font-semibold text-amber-600 dark:text-amber-400 bg-amber-500/5 hover:bg-amber-500/10 disabled:opacity-40 shadow-sm transition-all flex items-center justify-center gap-1.5"
+                          className="py-2.5 px-3 border border-amber-500/30 rounded-lg text-xs font-semibold text-amber-600 dark:text-amber-400 bg-amber-500/5 hover:bg-amber-500/10 disabled:opacity-40 shadow-sm transition-all flex items-center justify-center gap-1.5"
                           title="Temporarily block login — reversible"
                         >
                           <Clock size={12} />
@@ -1316,7 +1317,7 @@ export default function UsersPage() {
                         <button
                           onClick={() => openStatusDialog(selectedUser, 'banned')}
                           disabled={isActionLoading}
-                          className="py-2 px-3 border border-red-500/30 rounded-lg text-xs font-semibold text-red-600 dark:text-red-400 bg-red-500/5 hover:bg-red-500/10 disabled:opacity-40 shadow-sm transition-all flex items-center justify-center gap-1.5"
+                          className="py-2.5 px-3 border border-red-500/30 rounded-lg text-xs font-semibold text-red-600 dark:text-red-400 bg-red-500/5 hover:bg-red-500/10 disabled:opacity-40 shadow-sm transition-all flex items-center justify-center gap-1.5"
                           title="Permanently block login"
                         >
                           <Ban size={12} />
@@ -1328,7 +1329,7 @@ export default function UsersPage() {
                         <button
                           onClick={() => executeSetStatus(selectedUser._id, 'active')}
                           disabled={isActionLoading}
-                          className="py-2 px-3 border border-emerald-500/30 rounded-lg text-xs font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-500/5 hover:bg-emerald-500/10 disabled:opacity-40 shadow-sm transition-all flex items-center justify-center gap-1.5"
+                          className={`${selectedUser.accountStatus === 'banned' ? 'col-span-2 ' : ''}py-2.5 px-3 border border-emerald-500/30 rounded-lg text-xs font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-500/5 hover:bg-emerald-500/10 disabled:opacity-40 shadow-sm transition-all flex items-center justify-center gap-1.5`}
                           title="Restore login access"
                         >
                           <PlayCircle size={12} />
@@ -1338,7 +1339,7 @@ export default function UsersPage() {
                           <button
                             onClick={() => openStatusDialog(selectedUser, 'banned')}
                             disabled={isActionLoading}
-                            className="py-2 px-3 border border-red-500/30 rounded-lg text-xs font-semibold text-red-600 dark:text-red-400 bg-red-500/5 hover:bg-red-500/10 disabled:opacity-40 shadow-sm transition-all flex items-center justify-center gap-1.5"
+                            className="py-2.5 px-3 border border-red-500/30 rounded-lg text-xs font-semibold text-red-600 dark:text-red-400 bg-red-500/5 hover:bg-red-500/10 disabled:opacity-40 shadow-sm transition-all flex items-center justify-center gap-1.5"
                           >
                             <Ban size={12} />
                             Ban
@@ -1346,18 +1347,18 @@ export default function UsersPage() {
                         )}
                       </>
                     )}
-                  </div>
+                  </>
                 )}
 
-                {/* Delete — the destructive action lives alone, last */}
+                {/* Delete — full-width grid cell, always visibly red */}
                 {!selectedUser.isAdmin && (
                   <button
                     onClick={() => handleDeleteUser(selectedUser)}
                     disabled={isActionLoading}
-                    className="w-full py-2 px-3 rounded-lg text-xs font-semibold text-neutral-500 dark:text-neutral-450 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-500/5 border border-transparent hover:border-red-500/20 disabled:opacity-40 transition-all flex items-center justify-center gap-1.5"
+                    className="col-span-2 w-full py-2.5 px-3 rounded-lg text-xs font-semibold text-red-600 dark:text-red-400 bg-red-500/[0.06] border border-red-500/25 hover:bg-red-500/10 hover:border-red-500/40 disabled:opacity-40 transition-all flex items-center justify-center gap-1.5"
                     title="Remove from all lists and block login; posts and comments are kept"
                   >
-                    <UserX size={12} />
+                    <UserX size={13} />
                     Delete Account
                   </button>
                 )}
