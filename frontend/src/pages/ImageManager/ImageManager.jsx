@@ -45,6 +45,17 @@ const formatBytes = (bytes) => {
   return `${size.toFixed(1)} ${units[i]}`;
 };
 
+// What the platform actually stores/serves — the optimized WebP master.
+// Falls back to originalSizeBytes only for legacy records predating the
+// compression gate (or Sanity proxy paths with no size recorded).
+const getStoredSize = (img) => img?.storedSizeBytes || null;
+
+// Savings from the compression gate (WebP q88, max 1600px) vs the original file.
+const getCompressionPct = (img) => {
+  if (!img?.storedSizeBytes || !img?.originalSizeBytes || img.storedSizeBytes >= img.originalSizeBytes) return null;
+  return Math.round((1 - img.storedSizeBytes / img.originalSizeBytes) * 100);
+};
+
 const getThumbnailUrl = (variants) => {
   if (!variants) return null;
   return variants.thumbnail?.url || variants.medium?.url || variants.original?.url || null;
@@ -149,8 +160,13 @@ const ImageManager = () => {
   // Pagination
   const totalPages = Math.max(1, pagination.pages || 1);
 
-  // Stats computation based on list
-  const totalStorage = images.reduce((sum, img) => sum + (img.originalSizeBytes || 0), 0);
+  // Stats: stored = what we actually pay for (post-compression); original =
+  // what users handed us. The gap is the compression gate's savings.
+  const totalStorage = images.reduce((sum, img) => sum + (getStoredSize(img) || img.originalSizeBytes || 0), 0);
+  const totalOriginal = images.reduce((sum, img) => sum + (img.originalSizeBytes || 0), 0);
+  const totalSavedPct = totalOriginal > 0 && totalStorage > 0 && totalStorage < totalOriginal
+    ? Math.round((1 - totalStorage / totalOriginal) * 100)
+    : null;
   const activeCount = images.filter(img => !img.deletedAt).length;
   const trashedCount = images.filter(img => img.deletedAt).length;
 
@@ -197,8 +213,13 @@ const ImageManager = () => {
         {/* Storage Volume */}
         <div className="bg-white dark:bg-[#151518]/70 border border-neutral-200/40 dark:border-white/5 p-4 rounded-xl shadow-[0_1px_3px_rgba(0,0,0,0.02)] flex items-center justify-between group hover:border-neutral-300 dark:hover:border-neutral-800 transition-all">
           <div className="space-y-1">
-            <span className="text-[10px] font-semibold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider">Page Storage</span>
+            <span className="text-[10px] font-semibold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider">Stored</span>
             <p className="text-xl font-bold text-neutral-800 dark:text-neutral-100 leading-none font-mono text-[16px]">{formatBytes(totalStorage)}</p>
+            {totalSavedPct !== null && (
+              <p className="text-[9px] text-emerald-600 dark:text-emerald-400 font-semibold">
+                −{totalSavedPct}% vs originals ({formatBytes(totalOriginal)})
+              </p>
+            )}
           </div>
           <div className="w-8 h-8 rounded-lg bg-blue-500/10 flex items-center justify-center text-blue-600 dark:text-blue-550">
             <HardDrive size={15} strokeWidth={1.5} />
@@ -347,7 +368,7 @@ const ImageManager = () => {
                   <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 p-3 flex flex-col justify-end">
                     <p className="text-[10px] font-semibold text-white truncate">{img.originalFileName || 'Unnamed'}</p>
                     <p className="text-[8px] text-neutral-300 font-mono mt-0.5">
-                      {formatBytes(img.originalSizeBytes)} • {img.sourceWidth && img.sourceHeight ? `${img.sourceWidth}x${img.sourceHeight}` : '—'}
+                      {formatBytes(getStoredSize(img) || img.originalSizeBytes)} • {img.sourceWidth && img.sourceHeight ? `${img.sourceWidth}x${img.sourceHeight}` : '—'}
                     </p>
                   </div>
 
@@ -426,7 +447,7 @@ const ImageManager = () => {
 
                     {/* Specs */}
                     <div className="w-[15%] pr-4 space-y-0.5 font-mono text-[9px] text-neutral-500">
-                      <p className="font-semibold text-neutral-600 dark:text-neutral-400">{formatBytes(img.originalSizeBytes)}</p>
+                      <p className="font-semibold text-neutral-600 dark:text-neutral-400">{formatBytes(getStoredSize(img) || img.originalSizeBytes)}</p>
                       <p>{img.sourceWidth && img.sourceHeight ? `${img.sourceWidth}×${img.sourceHeight}` : '—'}</p>
                     </div>
 
@@ -599,19 +620,27 @@ const ImageManager = () => {
                     </div>
                     <div className="bg-neutral-50/50 dark:bg-[#1b1b1e]/30 border border-neutral-200/30 dark:border-white/5 rounded-xl p-3 shadow-sm">
                       <div className="flex items-center gap-1 text-[8px] font-bold text-neutral-400 dark:text-neutral-500 uppercase tracking-wide">
-                        <HardDrive size={9} /> Storage Size
+                        <HardDrive size={9} /> Stored Size
                       </div>
                       <p className="text-[11px] font-mono font-bold text-neutral-800 dark:text-neutral-200 mt-0.5">
-                        {formatBytes(selectedImage.originalSizeBytes)}
+                        {formatBytes(getStoredSize(selectedImage) || selectedImage.originalSizeBytes)}
                       </p>
+                      {getCompressionPct(selectedImage) !== null && (
+                        <p className="text-[8.5px] text-emerald-600 dark:text-emerald-400 font-semibold mt-0.5">
+                          −{getCompressionPct(selectedImage)}% vs original ({formatBytes(selectedImage.originalSizeBytes)})
+                        </p>
+                      )}
                     </div>
                     <div className="bg-neutral-50/50 dark:bg-[#1b1b1e]/30 border border-neutral-200/30 dark:border-white/5 rounded-xl p-3 shadow-sm">
                       <div className="flex items-center gap-1 text-[8px] font-bold text-neutral-400 dark:text-neutral-500 uppercase tracking-wide">
-                        <FileType size={9} /> MIME Type
+                        <FileType size={9} /> Format
                       </div>
-                      <p className="text-[10.5px] font-mono font-semibold text-neutral-850 dark:text-neutral-300 mt-0.5 truncate" title={selectedImage.originalMimeType}>
-                        {selectedImage.originalMimeType || 'image/unknown'}
+                      <p className="text-[10.5px] font-mono font-semibold text-neutral-850 dark:text-neutral-300 mt-0.5 truncate" title={selectedImage.storedMimeType || selectedImage.originalMimeType}>
+                        {(selectedImage.storedMimeType || selectedImage.originalMimeType || 'image/unknown').replace('image/', '')}
                       </p>
+                      {selectedImage.storedMimeType && selectedImage.originalMimeType && selectedImage.storedMimeType !== selectedImage.originalMimeType && (
+                        <p className="text-[8.5px] text-neutral-400 mt-0.5">from {selectedImage.originalMimeType.replace('image/', '')}</p>
+                      )}
                     </div>
                     <div className="bg-neutral-50/50 dark:bg-[#1b1b1e]/30 border border-neutral-200/30 dark:border-white/5 rounded-xl p-3 shadow-sm">
                       <div className="flex items-center gap-1 text-[8px] font-bold text-neutral-400 dark:text-neutral-500 uppercase tracking-wide">

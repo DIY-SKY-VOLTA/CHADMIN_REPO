@@ -153,6 +153,11 @@ exports.adminListImages = async (req, res) => {
         originalFileName: img.originalFileName,
         originalMimeType: img.originalMimeType,
         originalSizeBytes: img.originalSizeBytes,
+        // What is ACTUALLY stored/served: the optimized WebP master uploaded
+        // to Sanity (createImageVariants runs before upload, so this is the
+        // post-compression size — NOT the original file size).
+        storedSizeBytes: img.variants?.original?.sizeBytes || null,
+        storedMimeType: img.variants?.original?.mimeType || null,
         sourceWidth: img.sourceWidth,
         sourceHeight: img.sourceHeight,
         user: userInfo,
