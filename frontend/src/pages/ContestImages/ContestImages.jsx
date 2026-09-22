@@ -26,9 +26,11 @@ import {
   Check,
   CheckCheck,
   SkipForward,
+  ShieldCheck,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'react-hot-toast';
+import ConfirmDialog from '@/components/UI/ConfirmDialog';
 import adminAPI from '@/api/adminAPI';
 import { copyToClipboard } from '@/utils/clipboard';
 import { uploadContestImageFromUrl } from '@/api/contestAPI';
@@ -39,6 +41,7 @@ const FILTER_OPTIONS = [
   { key: 'broken', label: 'Broken' },
   { key: 'no_backup', label: 'No Backup' },
   { key: 'healthy', label: 'Healthy' },
+  { key: 'stale', label: 'Stale' },
   { key: 'unknown', label: 'Unknown' },
 ];
 
@@ -119,7 +122,13 @@ const ContestImages = () => {
   const [activeFilter, setActiveFilter] = useState('all');
   const [page, setPage] = useState(1);
   const [pagination, setPagination] = useState({ total: 0, pages: 1 });
-  const [stats, setStats] = useState({ total: 0, healthy: 0, broken: 0, no_backup: 0, no_image: 0, unknown: 0 });
+  const [stats, setStats] = useState({ total: 0, healthy: 0, broken: 0, no_backup: 0, no_image: 0, unknown: 0, stale: 0 });
+  const [facets, setFacets] = useState({ categories: [], sources: [] });
+  const [categoryFilter, setCategoryFilter] = useState('');
+  const [sourceFilter, setSourceFilter] = useState('');
+  // Deep Check: explicit live verification sweep. { done, total, alive, dead, errors } while running.
+  const [deepCheck, setDeepCheck] = useState(null);
+  const [deepCheckDialog, setDeepCheckDialog] = useState(false);
   const [sortBy, setSortBy] = useState('title');
   const [sortOrder, setSortOrder] = useState('asc');
 
@@ -217,23 +226,25 @@ const ContestImages = () => {
           filter: activeFilter,
           sortBy,
           sortOrder,
-          // Re-verify primary URLs against the live web so Broken reflects
-          // reality; results are cached server-side so repeat views are fast
-          verify: 'true',
+          // Reads stored statuses (persisted by ingestion + Deep Checks) —
+          // instant. Re-verification only happens via the header Deep Check.
+          category: categoryFilter || undefined,
+          source: sourceFilter || undefined,
         },
       });
 
       if (res.success) {
         setContests(res.contests || []);
         setPagination(res.pagination || { total: 0, pages: 1 });
-        setStats(res.stats || { total: 0, healthy: 0, broken: 0, no_backup: 0, no_image: 0, unknown: 0 });
+        setStats(res.stats || { total: 0, healthy: 0, broken: 0, no_backup: 0, no_image: 0, unknown: 0, stale: 0 });
+        if (res.facets) setFacets(res.facets);
       }
     } catch (err) {
       toast.error(err?.message || 'Failed to load contest images');
     } finally {
       if (!silent) setIsLoading(false);
     }
-  }, [page, debouncedSearch, activeFilter, sortBy, sortOrder]);
+  }, [page, debouncedSearch, activeFilter, sortBy, sortOrder, categoryFilter, sourceFilter]);
 
   useEffect(() => {
     fetchContests();
@@ -379,6 +390,59 @@ const ContestImages = () => {
     }
   };
 
+  // Deep Check — explicitly re-test every image URL against the live web in
+  // client-driven batches (progress per batch) and persist results to Mongo.
+  // Deliberately NOT part of normal browsing: stored statuses make the list
+  // load instantly; verification is an on-demand operation.
+  const DEEP_CHECK_BATCH = 50;
+  const handleDeepCheck = async () => {
+    if (deepCheck) return; // one sweep at a time
+    setDeepCheckDialog(false);
+    const progress = { done: 0, total: 0, alive: 0, dead: 0, errors: 0 };
+    setDeepCheck(progress);
+    try {
+      const idsRes = await adminAPI.get('/contests/images/health', {
+        params: { page: 1, limit: 100, filter: 'all', idsOnly: true },
+      });
+      const ids = idsRes?.ids || [];
+      if (ids.length === 0) {
+        toast.error('No contests to check');
+        setDeepCheck(null);
+        return;
+      }
+      progress.total = ids.length;
+      setDeepCheck({ ...progress });
+
+      for (let i = 0; i < ids.length; i += DEEP_CHECK_BATCH) {
+        const batch = ids.slice(i, i + DEEP_CHECK_BATCH);
+        try {
+          const res = await adminAPI.post('/contests/images/bulk-recheck', { contestIds: batch });
+          if (res.success) {
+            for (const r of res.results || []) {
+              if (r.status === 'alive') progress.alive += 1;
+              else if (r.status === 'dead') progress.dead += 1;
+              else progress.errors += 1;
+            }
+          } else {
+            progress.errors += batch.length;
+          }
+        } catch {
+          progress.errors += batch.length;
+        }
+        progress.done = Math.min(progress.total, progress.done + batch.length);
+        setDeepCheck({ ...progress });
+      }
+
+      toast.success(`Deep check complete — ${progress.alive} alive, ${progress.dead} broken, ${progress.errors} errors`);
+      fetchContests(true);
+    } catch (err) {
+      toast.error(err?.message || 'Deep check failed');
+    } finally {
+      // Leave the final summary visible for a moment before clearing
+      setTimeout(() => setDeepCheck(null), 4000);
+    }
+  };
+
   // Select ALL contests matching the current filter/search (across every page)
   const handleSelectAllMatching = async () => {
     setIsSelectingAllMatching(true);
@@ -391,6 +455,8 @@ const ContestImages = () => {
           filter: activeFilter,
           sortBy,
           sortOrder,
+          category: categoryFilter || undefined,
+          source: sourceFilter || undefined,
           idsOnly: true,
         },
       });
@@ -731,19 +797,38 @@ const ContestImages = () => {
           <h1 className="text-base font-semibold text-neutral-900 dark:text-neutral-100 flex items-center gap-2">
             Contest Image Health
           </h1>
-          <p className="text-[11px] text-neutral-400 dark:text-neutral-500 mt-0.5">
+          <p className="text-xs text-neutral-400 dark:text-neutral-500 mt-0.5">
             {stats.total > 0
-              ? `Monitoring ${stats.total} contest images — ${stats.broken} broken, ${stats.no_image} missing`
+              ? `Monitoring ${stats.total} contest images — ${stats.broken} broken, ${stats.no_image} missing${stats.stale > 0 ? `, ${stats.stale} stale` : ''}`
               : 'Check the health of contest images across all sources'}
           </p>
         </div>
         <div className="flex items-center gap-2">
           <button
+            onClick={() => setDeepCheckDialog(true)}
+            disabled={!!deepCheck}
+            title="Re-test every image URL against the live web and save the result"
+            className="px-3 py-1.5 rounded-lg border border-emerald-500/25 bg-emerald-500/5 hover:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 transition-all shadow-sm flex items-center gap-1.5 text-[11.5px] font-semibold disabled:opacity-50"
+          >
+            {deepCheck ? (
+              deepCheck.done >= deepCheck.total && deepCheck.total > 0
+                ? <Check size={12} />
+                : <Loader2 size={12} className="animate-spin" />
+            ) : (
+              <ShieldCheck size={13} />
+            )}
+            {deepCheck
+              ? deepCheck.done >= deepCheck.total
+                ? `${deepCheck.alive} alive · ${deepCheck.dead} broken`
+                : `Checking ${deepCheck.done}/${deepCheck.total}`
+              : 'Deep Check'}
+          </button>
+          <button
             onClick={() => {
               fetchContests();
               toast.success('Refreshed');
             }}
-            className="p-1.5 rounded-lg border border-neutral-200/50 dark:border-white/5 bg-white dark:bg-[#18181b] hover:bg-neutral-50 dark:hover:bg-white/5 text-neutral-500 hover:text-neutral-900 dark:hover:text-white transition-all shadow-sm flex items-center gap-1.5 text-[11px] font-medium"
+            className="p-1.5 rounded-lg border border-neutral-200/50 dark:border-white/5 bg-white dark:bg-[#18181b] hover:bg-neutral-50 dark:hover:bg-white/5 text-neutral-500 hover:text-neutral-900 dark:hover:text-white transition-all shadow-sm flex items-center gap-1.5 text-[11.5px] font-medium"
           >
             <RefreshCw size={12} className={isLoading ? 'animate-spin' : ''} />
             Refresh
@@ -752,14 +837,15 @@ const ContestImages = () => {
       </div>
 
       {/* Stats Summary Cards */}
-      <div className="shrink-0 p-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3">
+      <div className="shrink-0 px-6 py-5 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-3">
         {[
           { key: 'total', label: 'Total Contests', value: stats.total, icon: Globe, color: 'text-neutral-500', bg: 'bg-neutral-100 dark:bg-neutral-800/50' },
           { key: 'healthy', label: 'Healthy', value: stats.healthy, icon: CheckCircle2, color: 'text-emerald-600 dark:text-emerald-500', bg: 'bg-emerald-500/10' },
           { key: 'no_image', label: 'No Image', value: stats.no_image, icon: FileWarning, color: 'text-neutral-500', bg: 'bg-neutral-500/10' },
           { key: 'no_backup', label: 'No Backup', value: stats.no_backup, icon: AlertTriangle, color: 'text-amber-600 dark:text-amber-500', bg: 'bg-amber-500/10' },
           { key: 'broken', label: 'Broken', value: stats.broken, icon: Ban, color: 'text-red-600 dark:text-red-500', bg: 'bg-red-500/10' },
-          { key: 'unknown', label: 'Unknown', value: stats.unknown, icon: HelpCircle, color: 'text-neutral-500', bg: 'bg-neutral-500/10' },
+          { key: 'stale', label: 'Stale', value: stats.stale, icon: Clock, color: 'text-sky-600 dark:text-sky-500', bg: 'bg-sky-500/10', hint: 'Never checked, or last checked over 30 days ago' },
+          { key: 'unknown', label: 'Unknown', value: stats.unknown, icon: HelpCircle, color: 'text-neutral-500', bg: 'bg-neutral-500/10', hint: 'Image record has no status at all — normally 0 once the checker has run' },
         ].map((stat) => (
           <button
             key={stat.key}
@@ -768,6 +854,7 @@ const ContestImages = () => {
               else { setActiveFilter(stat.key); }
               setPage(1);
             }}
+            title={stat.hint || undefined}
             className={`bg-white dark:bg-[#151518]/70 border border-neutral-200/40 dark:border-white/5 p-4 rounded-xl shadow-[0_1px_3px_rgba(0,0,0,0.02)] flex items-center justify-between group hover:border-neutral-300 dark:hover:border-neutral-800 transition-all cursor-pointer ${
               activeFilter === stat.key || (stat.key === 'total' && activeFilter === 'all')
                 ? 'ring-1 ring-neutral-400/30 dark:ring-neutral-600/50'
@@ -775,7 +862,7 @@ const ContestImages = () => {
             }`}
           >
             <div className="space-y-1">
-              <span className="text-[10px] font-semibold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider">{stat.label}</span>
+              <span className="text-[10.5px] font-semibold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider">{stat.label}</span>
               <p className="text-xl font-bold text-neutral-800 dark:text-neutral-100 leading-none">{stat.value}</p>
             </div>
             <div className={`w-8 h-8 rounded-lg ${stat.bg} flex items-center justify-center ${stat.color}`}>
@@ -795,7 +882,7 @@ const ContestImages = () => {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search by title, source, category..."
-            className="w-full pl-9 pr-8 py-1.5 bg-white dark:bg-[#151518] border border-neutral-200/60 dark:border-white/5 rounded-lg text-xs text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 focus:outline-none focus:border-neutral-400 dark:focus:border-neutral-700 transition-all shadow-[0_1px_2px_rgba(0,0,0,0.01)]"
+            className="w-full pl-9 pr-8 py-2 bg-white dark:bg-[#151518] border border-neutral-200/60 dark:border-white/5 rounded-lg text-[12.5px] text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 focus:outline-none focus:border-neutral-400 dark:focus:border-neutral-700 transition-all shadow-[0_1px_2px_rgba(0,0,0,0.01)]"
           />
           {search && (
             <button
@@ -848,13 +935,35 @@ const ContestImages = () => {
             </div>
           )}
 
+          {/* Facet filters — narrow by pipeline metadata */}
+          <select
+            value={categoryFilter}
+            onChange={(e) => { setCategoryFilter(e.target.value); setPage(1); }}
+            className="py-2 pl-2.5 pr-7 rounded-lg bg-white dark:bg-[#151518] border border-neutral-200/60 dark:border-white/5 text-[11.5px] font-medium text-neutral-600 dark:text-neutral-300 focus:outline-none focus:border-neutral-400 dark:focus:border-neutral-700 shadow-sm cursor-pointer max-w-[170px]"
+          >
+            <option value="">All Categories</option>
+            {facets.categories.map((c) => (
+              <option key={c} value={c}>{c}</option>
+            ))}
+          </select>
+          <select
+            value={sourceFilter}
+            onChange={(e) => { setSourceFilter(e.target.value); setPage(1); }}
+            className="py-2 pl-2.5 pr-7 rounded-lg bg-white dark:bg-[#151518] border border-neutral-200/60 dark:border-white/5 text-[11.5px] font-medium text-neutral-600 dark:text-neutral-300 focus:outline-none focus:border-neutral-400 dark:focus:border-neutral-700 shadow-sm cursor-pointer max-w-[170px]"
+          >
+            <option value="">All Sources</option>
+            {facets.sources.map((s) => (
+              <option key={s} value={s}>{s}</option>
+            ))}
+          </select>
+
           {/* Filters */}
-          <div className="p-0.5 rounded-lg bg-neutral-200/50 dark:bg-neutral-900/60 border border-neutral-200/40 dark:border-white/5 flex gap-0.5 shadow-inner">
+          <div className="p-0.5 rounded-lg bg-neutral-200/50 dark:bg-neutral-900/60 border border-neutral-200/40 dark:border-white/5 flex gap-0.5 shadow-inner flex-wrap">
             {FILTER_OPTIONS.map((opt) => (
               <button
                 key={opt.key}
                 onClick={() => { setActiveFilter(opt.key); setPage(1); }}
-                className={`px-3 py-1 text-[11px] font-medium rounded-md transition-all ${
+                className={`px-3 py-1.5 text-[11.5px] font-medium rounded-md transition-all cursor-pointer ${
                   activeFilter === opt.key
                     ? 'bg-white dark:bg-[#1b1b1e] text-neutral-900 dark:text-white shadow-sm'
                     : 'text-neutral-500 dark:text-neutral-400 hover:text-neutral-800 dark:hover:text-neutral-300'
@@ -914,7 +1023,7 @@ const ContestImages = () => {
           <div className="bg-white dark:bg-[#151518]/70 border border-neutral-200/40 dark:border-white/5 rounded-xl overflow-hidden shadow-[0_1px_2px_rgba(0,0,0,0.01)]">
             <div className="min-w-full divide-y divide-neutral-200/50 dark:divide-white/5">
               {/* Table Headers */}
-              <div className="bg-neutral-50/50 dark:bg-neutral-900/30 px-5 py-2.5 flex items-center text-[10px] font-semibold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider">
+              <div className="bg-neutral-50/50 dark:bg-neutral-900/30 px-5 py-3 flex items-center text-[10.5px] font-semibold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider">
                 <div className="w-[3%] flex items-center">
                   <input
                     ref={headerCheckRef}
@@ -984,11 +1093,11 @@ const ContestImages = () => {
 
                       {/* Title */}
                       <div className="w-[28%] truncate pr-4">
-                        <span className="truncate font-semibold text-neutral-900 dark:text-white block text-[12px]">
+                        <span className="truncate font-semibold text-neutral-900 dark:text-white block text-[12.5px]">
                           {contest.title}
                         </span>
                         {contest.image?.alt && (
-                          <span className="text-[9px] text-neutral-400 dark:text-neutral-500 truncate block mt-0.5">
+                          <span className="text-[10px] text-neutral-400 dark:text-neutral-500 truncate block mt-0.5">
                             {contest.image.alt}
                           </span>
                         )}
@@ -997,7 +1106,7 @@ const ContestImages = () => {
                       {/* Category */}
                       <div className="w-[12%] pr-4 truncate">
                         {contest.category ? (
-                          <span className="px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800/50 text-[9px] font-medium text-neutral-500 dark:text-neutral-400 border border-neutral-200/50 dark:border-white/5">
+                          <span className="px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800/50 text-[10px] font-medium text-neutral-500 dark:text-neutral-400 border border-neutral-200/50 dark:border-white/5">
                             {contest.category}
                           </span>
                         ) : (
@@ -1009,8 +1118,8 @@ const ContestImages = () => {
                       <div className="w-[10%] pr-4 flex items-center gap-1.5">
                         {contest.source?.name ? (
                           <>
-                            <Globe size={10} className="text-neutral-400 shrink-0" />
-                            <span className="truncate text-[10px]">{contest.source.name}</span>
+                            <Globe size={11} className="text-neutral-400 shrink-0" />
+                            <span className="truncate text-[11px]">{contest.source.name}</span>
                           </>
                         ) : (
                           <span className="text-neutral-400">—</span>
@@ -1031,16 +1140,16 @@ const ContestImages = () => {
                       {/* Backup Status */}
                       <div className="w-[12%] pr-4">
                         {contest.image?.backupUrl ? (
-                          <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold ${STATUS_CONFIG.healthy.bg} ${STATUS_CONFIG.healthy.text} ${STATUS_CONFIG.healthy.border} border`}>
+                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${STATUS_CONFIG.healthy.bg} ${STATUS_CONFIG.healthy.text} ${STATUS_CONFIG.healthy.border} border`}>
                             R2 Backup
                           </span>
                         ) : (
-                          <span className="text-[9px] text-neutral-400">None</span>
+                          <span className="text-[10.5px] text-neutral-400">None</span>
                         )}
                       </div>
 
                       {/* Last Checked */}
-                      <div className="w-[11%] pr-4 text-[10px] text-neutral-400 dark:text-neutral-500">
+                      <div className="w-[11%] pr-4 text-[11px] text-neutral-400 dark:text-neutral-500">
                         {contest.image?.lastCheckedAt
                           ? formatDate(contest.image.lastCheckedAt)
                           : 'Never'}
@@ -1120,6 +1229,17 @@ const ContestImages = () => {
           </div>
         )}
       </div>
+
+      {/* Deep Check confirmation */}
+      <ConfirmDialog
+        open={deepCheckDialog}
+        onClose={() => setDeepCheckDialog(false)}
+        onConfirm={handleDeepCheck}
+        title="Run a live deep check?"
+        confirmLabel={stats.total > 0 ? `Check all ${stats.total} images` : 'Check all images'}
+      >
+        Every image URL is re-tested against the live web and the result is saved — broken flags then reflect reality. Runs in background batches on this page (a few minutes for ~1000 images); browsing stays instant and uses stored statuses.
+      </ConfirmDialog>
 
       {/* Bulk Backup Progress Modal */}
       <AnimatePresence>

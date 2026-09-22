@@ -11,6 +11,22 @@ const {
   mapSubcategory,
 } = require('../utils/tagNormalizer');
 
+// ─── Markdown-wrapped URL guard ─────────────────────────────────────────────
+// The external ingestion pipeline has (twice) stored raw markdown links as URL
+// field values: "[https://site/x.png](https://site/x.png)" instead of the URL.
+// A one-off cleanup script (Phase2 scripts/fixMarkdownWrappedUrls.js) repaired
+// the stored data; this helper keeps every read path (list, re-check, backup)
+// immune if ingestion ever writes it again. Extracts the href from
+// "[label](href)"; passes anything else through unchanged.
+const MD_LINK_RE = /^\s*\[([^\]]*)\]\(([^)]*)\)\s*$/;
+function unwrapMarkdownUrl(raw) {
+  if (typeof raw !== 'string') return raw;
+  const m = raw.match(MD_LINK_RE);
+  if (!m) return raw;
+  const picked = (m[2] || '').trim() || (m[1] || '').trim();
+  return /^https?:\/\//i.test(picked) ? picked : raw;
+}
+
 // ─── R2 Client ──────────────────────────────────────────────────────────────
 
 let r2Client = null;
@@ -50,7 +66,10 @@ const http = require('http');
 const url = require('url');
 
 const IMAGE_STATUS_CACHE = new Map();
-const CACHE_TTL = 5 * 60 * 1000;
+// 30 min — URL health changes slowly. The sweep also persists statuses to
+// Mongo (image.primary.status + lastCheckedAt), so the DB acts as the
+// long-term cache and list views read stored statuses instead of re-verifying.
+const CACHE_TTL = 30 * 60 * 1000;
 
 function classifyImageStatus(contest) {
   if (!contest) return 'unknown';
@@ -142,6 +161,12 @@ exports.getImagesHealth = async (req, res) => {
         { category: { $regex: search, $options: 'i' } },
       ];
     }
+    // Facet filters — narrow the base query so stats reflect the same scope
+    // as search does.
+    const categoryFilter = (req.query.category || '').trim();
+    if (categoryFilter) query.category = categoryFilter;
+    const sourceFilter = (req.query.source || '').trim();
+    if (sourceFilter) query['source.name'] = sourceFilter;
 
     // 1. Fetch all matching items minimally to compute accurate global stats and filter
     const allImages = await Contest.find(query).select('image').lean();
@@ -153,8 +178,19 @@ exports.getImagesHealth = async (req, res) => {
       const VERIFY_CONCURRENCY = 20;
       for (let i = 0; i < allImages.length; i += VERIFY_CONCURRENCY) {
         await Promise.all(allImages.slice(i, i + VERIFY_CONCURRENCY).map(async (c) => {
-          const url = c.image?.primary?.url;
+          const rawUrl = c.image?.primary?.url;
+          if (!rawUrl) return;
+          const url = unwrapMarkdownUrl(rawUrl);
           if (!url) return;
+          // Self-heal: if ingestion stored markdown-wrapped garbage, repair the
+          // stored field here so the whole pipeline is clean going forward.
+          if (url !== rawUrl) {
+            await Contest.updateOne(
+              { _id: c._id },
+              { $set: { 'image.primary.url': url } }
+            ).catch(() => {});
+            c.image.primary.url = url;
+          }
           const cached = IMAGE_STATUS_CACHE.get(url);
           if (cached && (Date.now() - cached.checkedAt) < CACHE_TTL) return;
           const result = await checkImageUrl(url, 8000);
@@ -172,14 +208,24 @@ exports.getImagesHealth = async (req, res) => {
 
     // Keys MUST match classifyImageStatus() return values (snake_case) —
     // camelCase keys here silently produced NaN counts (Broken/No Image = 0).
-    const stats = { total: allImages.length, healthy: 0, broken: 0, no_backup: 0, no_image: 0, unknown: 0 };
+    // 'stale' is a freshness view, not a status: never-checked or last checked
+    // more than 30 days ago. It overlaps status buckets by design.
+    const STALE_MS = 30 * 24 * 60 * 60 * 1000;
+    const now = Date.now();
+    const stats = { total: allImages.length, healthy: 0, broken: 0, no_backup: 0, no_image: 0, unknown: 0, stale: 0 };
     const filteredIds = [];
 
     for (const c of allImages) {
       const status = classifyImageStatus(c);
       if (stats[status] !== undefined) stats[status]++;
 
-      if (filter === 'all' || filter === status) {
+      const checkedAt = c.image?.primary?.lastCheckedAt
+        ? new Date(c.image.primary.lastCheckedAt).getTime()
+        : null;
+      const isStale = !checkedAt || (now - checkedAt) > STALE_MS;
+      if (isStale) stats.stale++;
+
+      if (filter === 'all' || filter === status || (filter === 'stale' && isStale)) {
         filteredIds.push(c._id);
       }
     }
@@ -211,7 +257,7 @@ exports.getImagesHealth = async (req, res) => {
       .lean();
 
     const mapped = contests.map((c) => {
-      const primaryUrl = c.image?.primary?.url || null;
+      const primaryUrl = unwrapMarkdownUrl(c.image?.primary?.url) || null;
       // image.backup is the canonical OBJECT { url, source, format, status, createdAt }.
       // Tolerate legacy string-shaped docs (pre-fix admin-dashboard writes) so the
       // health dashboard still displays them until the backfill script runs.
@@ -243,11 +289,22 @@ exports.getImagesHealth = async (req, res) => {
       };
     });
 
+    // Filter dropdown options — distinct values are small (dozens) and the
+    // collection is ~1k docs, so computing them per request is cheap.
+    const [categories, sources] = await Promise.all([
+      Contest.distinct('category'),
+      Contest.distinct('source.name'),
+    ]);
+
     res.json({
       success: true,
       contests: mapped,
       pagination: { total: totalFiltered, pages },
       stats,
+      facets: {
+        categories: categories.filter(Boolean).sort(),
+        sources: sources.filter(Boolean).sort(),
+      },
     });
   } catch (error) {
     console.error('Contest images health error:', error);
@@ -311,27 +368,53 @@ exports.bulkRecheck = async (req, res) => {
       .select('title image')
       .lean();
 
+    // Pooled (10 concurrent) instead of serial — a 1000-URL deep check would
+    // take ~20+ min serially; pooled it's ~2-3 min, delivered in client-driven
+    // batches so the UI can show live progress per request.
+    const byId = new Map(contests.map((c) => [String(c._id), c]));
     const results = [];
+    const CONCURRENCY = 10;
+    const queue = contestIds.map(String);
+    const lastCheckedIso = new Date().toISOString();
 
-    for (const contest of contests) {
-      const primaryUrl = contest.image?.primary?.url;
-      if (!primaryUrl) {
-        results.push({ contestId: contest._id, status: 'no_image', statusCode: null, reason: 'No image URL' });
-        continue;
-      }
-      const result = await checkImageUrl(primaryUrl);
-      const imageStatus = result.status === 'alive' ? 'healthy' : (result.status === 'dead' ? 'broken' : 'error');
-      await Contest.updateOne(
-        { _id: contest._id },
-        {
-          $set: {
-            'image.primary.lastCheckedAt': new Date().toISOString(),
-            'image.primary.status': imageStatus,
-          },
+    async function recheckWorker() {
+      while (queue.length > 0) {
+        const id = queue.shift();
+        const contest = byId.get(id);
+        if (!contest) {
+          results.push({ contestId: id, status: 'no_image', statusCode: null, reason: 'Not found' });
+          continue;
         }
-      );
-      results.push({ contestId: contest._id, status: result.status, statusCode: result.statusCode, reason: result.reason });
+        const primaryUrl = unwrapMarkdownUrl(contest.image?.primary?.url);
+        if (!primaryUrl) {
+          results.push({ contestId: contest._id, status: 'no_image', statusCode: null, reason: 'No image URL' });
+          continue;
+        }
+        // Fresh in-memory cache (shared with the health sweep) — skip the HTTP
+        // hit but still report, so repeat deep checks are near-instant.
+        const cached = IMAGE_STATUS_CACHE.get(primaryUrl);
+        if (cached && (Date.now() - cached.checkedAt) < CACHE_TTL) {
+          results.push({ contestId: contest._id, status: cached.status, statusCode: cached.statusCode ?? null, reason: cached.reason, cached: true });
+          continue;
+        }
+        const result = await checkImageUrl(primaryUrl, 8000);
+        IMAGE_STATUS_CACHE.set(primaryUrl, { ...result, checkedAt: Date.now() });
+        const imageStatus = result.status === 'alive' ? 'healthy' : (result.status === 'dead' ? 'broken' : 'error');
+        // A failed per-row write must never fail the whole batch
+        await Contest.updateOne(
+          { _id: contest._id },
+          {
+            $set: {
+              'image.primary.lastCheckedAt': lastCheckedIso,
+              'image.primary.status': imageStatus,
+            },
+          }
+        ).catch(() => {});
+        results.push({ contestId: contest._id, status: result.status, statusCode: result.statusCode, reason: result.reason });
+      }
     }
+
+    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, queue.length) }, () => recheckWorker()));
 
     res.json({
       success: true,
@@ -720,7 +803,7 @@ exports.backupImage = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Contest not found' });
     }
 
-    const primaryUrl = contest.image?.primary?.url;
+    const primaryUrl = unwrapMarkdownUrl(contest.image?.primary?.url);
     if (!primaryUrl) {
       return res.status(400).json({ success: false, message: 'Contest has no primary image URL' });
     }
