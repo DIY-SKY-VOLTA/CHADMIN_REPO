@@ -71,6 +71,7 @@ const sections = [
         heading: 'Events',
         items: [
           { icon: CalendarDays, label: 'Events', path: '/events' },
+          { icon: FileTextIcon, label: 'Event Details', path: '/events/details' },
           { icon: AlertTriangle, label: 'Review Queue', path: '/events/review-queue' },
           { icon: CalendarDays, label: 'Event Types', path: '/event-types' },
         ],

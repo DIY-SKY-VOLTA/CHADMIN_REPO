@@ -43,6 +43,14 @@ const EDITABLE_FIELDS = [
   'trendingUntil',
   'isRecurring',
   'recurrence',
+  // Embedded detail groups — edited from the Event Details page. Arrays of
+  // loose objects (pipeline v3.1 schema) + the preparation checklist.
+  'speakers',
+  'people',
+  'agenda',
+  'faqs',
+  'pricing',
+  'preparation',
 ];
 
 const SORTABLE = {
@@ -84,6 +92,75 @@ function flattenForSet(value, prefix, out) {
     flattenForSet(value[key], prefix ? `${prefix}.${key}` : key, out);
   }
 }
+
+// ─── Event Details (embedded speaker/agenda/faq/pricing/preparation groups) ───
+// Events keep their detail content ON the event document (unlike contests,
+// which use a separate contest_details collection). These endpoints expose a
+// focused editing surface; writes go through updateEvent's whitelist so the
+// public site (which renders event.speakers / event.agenda / event.faqs
+// directly) sees changes immediately.
+
+// Summary of which detail groups each event has — powers the list-page badges.
+exports.listEventsWithDetails = async (req, res) => {
+  try {
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 25));
+    const search = (req.query.search || '').trim();
+    const status = req.query.status || 'all';
+
+    const filter = {};
+    if (search) {
+      const rx = new RegExp(escapeRegex(search), 'i');
+      filter.$or = [{ title: rx }, { headline: rx }, { slug: rx }];
+    }
+    if (status !== 'all') filter.status = status;
+
+    const [events, total] = await Promise.all([
+      Event.find(filter)
+        .select('title headline slug eventType status image eventDates venue speakers people agenda faqs pricing preparation updatedAt')
+        .sort({ updatedAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .lean(),
+      Event.countDocuments(filter),
+    ]);
+
+    res.json({
+      success: true,
+      events,
+      pagination: { page, limit, total, pages: Math.max(1, Math.ceil(total / limit)) },
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// Focused read for the details editor — the full doc minus pipeline metadata.
+exports.getEventDetails = async (req, res) => {
+  try {
+    const event = await Event.findOne(buildIdQuery(req.params.id))
+      .select('-metadata')
+      .lean({ virtuals: true });
+    if (!event) return res.status(404).json({ success: false, message: 'Event not found' });
+    res.json({ success: true, event });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// Save details — reuses updateEvent (whitelist + flatten) by faking the
+// request through it, so all validation and side-effects stay in one place.
+exports.saveEventDetails = async (req, res) => {
+  req.body = {
+    speakers: req.body.speakers,
+    people: req.body.people,
+    agenda: req.body.agenda,
+    faqs: req.body.faqs,
+    pricing: req.body.pricing,
+    preparation: req.body.preparation,
+  };
+  return exports.updateEvent(req, res);
+};
 
 exports.getEventStats = async (req, res) => {
   try {

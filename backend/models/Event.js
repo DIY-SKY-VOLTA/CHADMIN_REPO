@@ -270,6 +270,17 @@ const eventSchema = new mongoose.Schema(
     speakers: [{ type: mongoose.Schema.Types.Mixed }],
     agenda: [{ type: mongoose.Schema.Types.Mixed }],
     pricing: [{ type: mongoose.Schema.Types.Mixed }],
+    // v3.1 parity with Phase2's event model — tagged people container and the
+    // preparation checklist. Kept loose (Mixed) to match the shared collection.
+    people: [{ type: mongoose.Schema.Types.Mixed }],
+    preparation: {
+      type: new mongoose.Schema({
+        prerequisites: [{ type: String }],
+        materialsProvided: [{ type: String }],
+        materialsRequired: [{ type: String }],
+      }, { _id: false }),
+      default: undefined,
+    },
     targetAudience: [{ type: mongoose.Schema.Types.Mixed }],
     benefits: [{ type: mongoose.Schema.Types.Mixed }],
     certifications: [{ type: mongoose.Schema.Types.Mixed }],
