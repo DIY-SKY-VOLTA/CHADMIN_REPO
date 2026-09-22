@@ -331,16 +331,17 @@ export default function UsersPage() {
     }
   };
 
-  // Soft delete with typed confirmation. The user keeps their posts and
-  // comments (backend enforces this), but disappears from all lists and
-  // can never log in again.
+  // Schedule a deletion with typed confirmation. The account locks
+  // immediately (they can never log in again) and the full cascade —
+  // posts erased, comments anonymized, references cleaned — runs on the
+  // main app after a 30-day grace period. Restoring before that cancels it.
   const handleDeleteUser = (user) => {
     setDialog({
-      title: `Permanently delete ${user.username}?`,
+      title: `Schedule deletion of ${user.username}?`,
       intent: 'danger', actionIcon: 'delete',
-      confirmLabel: 'Delete forever',
+      confirmLabel: 'Schedule deletion',
       requireText: 'DELETE',
-      body: <>Their {user.writerStats?.approved ?? 0} published article(s) and comments stay online for the record, but they are removed from every list and can <strong>never log in again</strong>.</>,
+      body: <>They are locked out immediately and permanently. After a <strong>30-day grace period</strong> (cancel anytime via Restore), their {user.writerStats?.approved ?? 0} published article(s) are erased from Sanity, comments are anonymized as “[Deleted User]”, and all remaining data is purged.</>,
       onConfirm: async () => {
         setIsActionLoading(true);
         try {
@@ -361,14 +362,23 @@ export default function UsersPage() {
     });
   };
 
-  // Undo a soft delete from the Deleted view — the account becomes active
-  // again (any ban stays and must be lifted separately).
+  // Undo a delete from the Deleted/Pending views — the account becomes
+  // active again and any scheduled purge is cancelled (any ban stays and
+  // must be lifted separately).
   const handleRestoreUser = (user) => {
     setDialog({
       title: `Restore ${user.username}?`,
       intent: 'neutral',
       confirmLabel: 'Restore',
-      body: <>The account becomes visible and active again. Any previous ban remains in place and can be lifted separately.</>,
+      body: (
+        <>
+          The account becomes visible and active again
+          {user.accountStatus === 'deletion_pending' && (
+            <> and the <strong>scheduled deletion is cancelled</strong></>
+          )}
+          . Any previous ban remains in place and can be lifted separately.
+        </>
+      ),
       onConfirm: async () => {
         setIsActionLoading(true);
         try {
@@ -388,19 +398,21 @@ export default function UsersPage() {
     });
   };
 
-  // HARD delete — permanently removes a test account from MongoDB. Backend
-  // refuses content-bearing accounts and admins; typed DELETE required.
+  // Expedite the cascade — moves the scheduled purge to now; the main app's
+  // hourly job then erases posts, anonymizes comments and cleans references
+  // with a full audit trail. Typed ERASE required.
   const handlePurgeUser = (user) => {
     setDialog({
-      title: `Erase ${user.username} from the database forever?`,
+      title: `Purge ${user.username} now?`,
       intent: 'danger', actionIcon: 'delete',
-      confirmLabel: 'Erase forever',
+      confirmLabel: 'Purge now',
       requireText: 'ERASE',
       body: (
         <>
-          This <strong>cannot be undone</strong>. The account document and its
-          comments are removed from MongoDB. Accounts with blog submissions
-          are refused by the server — those must stay soft-deleted for the record.
+          This <strong>cannot be undone</strong>. The grace period is skipped:
+          their posts are erased from Sanity, comments are anonymized as
+          “Removed User”, and every remaining reference is cleaned by the
+          main app's purge job within the hour.
         </>
       ),
       onConfirm: async () => {
@@ -627,6 +639,16 @@ export default function UsersPage() {
               Restricted
             </button>
             <button
+              onClick={() => setRoleFilter('pending_deletion')}
+              className={`px-3 py-1 text-[11px] font-medium rounded-md transition-all ${
+                roleFilter === 'pending_deletion'
+                  ? 'bg-white dark:bg-[#1b1b1e] text-neutral-900 dark:text-white shadow-sm'
+                  : 'text-neutral-500 dark:text-neutral-400 hover:text-neutral-750 dark:hover:text-neutral-350'
+              }`}
+            >
+              Pending deletion
+            </button>
+            <button
               onClick={() => setRoleFilter('deleted')}
               className={`px-3 py-1 text-[11px] font-medium rounded-md transition-all ${
                 roleFilter === 'deleted'
@@ -829,6 +851,11 @@ export default function UsersPage() {
                       {user.isAdmin && (
                         <span className="px-1.5 py-0.5 bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/10 rounded text-[9px] font-bold">
                           ADMIN
+                        </span>
+                      )}
+                      {user.accountStatus === 'deletion_pending' && (
+                        <span className="px-1.5 py-0.5 bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/10 rounded text-[9px] font-bold">
+                          PURGE {user.scheduledPurgeAt ? new Date(user.scheduledPurgeAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : ''}
                         </span>
                       )}
                       {user.accountStatus === 'banned' && (
@@ -1190,18 +1217,23 @@ export default function UsersPage() {
                 {/* Account moderation status */}
                 {selectedUser.accountStatus && selectedUser.accountStatus !== 'active' && (
                   <div className={`rounded-xl p-3 space-y-1.5 border ${
-                    selectedUser.accountStatus === 'banned'
+                    selectedUser.accountStatus === 'banned' || selectedUser.accountStatus === 'deletion_pending'
                       ? 'bg-red-500/5 border-red-500/20'
                       : 'bg-amber-500/5 border-amber-500/20'
                   }`}>
                     <div className="flex items-center gap-1.5">
-                      <AlertTriangle size={12} className={selectedUser.accountStatus === 'banned' ? 'text-red-500' : 'text-amber-500'} />
+                      <AlertTriangle size={12} className={selectedUser.accountStatus === 'banned' || selectedUser.accountStatus === 'deletion_pending' ? 'text-red-500' : 'text-amber-500'} />
                       <span className={`text-[10px] font-bold uppercase tracking-wider ${
-                        selectedUser.accountStatus === 'banned' ? 'text-red-600 dark:text-red-400' : 'text-amber-600 dark:text-amber-400'
+                        selectedUser.accountStatus === 'banned' || selectedUser.accountStatus === 'deletion_pending' ? 'text-red-600 dark:text-red-400' : 'text-amber-600 dark:text-amber-400'
                       }`}>
-                        Account {selectedUser.accountStatus}
+                        {selectedUser.accountStatus === 'deletion_pending' ? 'Deletion scheduled' : `Account ${selectedUser.accountStatus}`}
                       </span>
                     </div>
+                    {selectedUser.scheduledPurgeAt && (
+                      <p className="text-[10px] text-red-600 dark:text-red-400 leading-relaxed font-medium">
+                        Purge runs {new Date(selectedUser.scheduledPurgeAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} — restoring before then cancels it.
+                      </p>
+                    )}
                     {selectedUser.statusReason && (
                       <p className="text-[10px] text-neutral-500 dark:text-neutral-400 leading-relaxed">
                         Reason: {selectedUser.statusReason}
@@ -1213,7 +1245,9 @@ export default function UsersPage() {
                       </p>
                     )}
                     <p className="text-[9px] text-neutral-400 leading-relaxed">
-                      They cannot log in, and token refreshes are rejected — the block lands within ~15 minutes even with an open session.
+                      {selectedUser.accountStatus === 'deletion_pending'
+                        ? 'They cannot log in. At purge: posts erased, comments anonymized, all references cleaned by the main app.'
+                        : 'They cannot log in, and every authenticated request is rejected — the block is immediate.'}
                     </p>
                   </div>
                 )}

@@ -1,7 +1,12 @@
 /**
  * User Model
  * Defines user schema with authentication and contest interaction features
- * 
+ *
+ * SHARED COLLECTION with Phase2 (backend/src/modules/auth/user.model.js).
+ * This declaration MUST stay field-compatible with that one — Mongoose strict
+ * mode silently drops fields not declared here, so anything the dashboard
+ * writes (status changes, session wipes, lifecycle fields) needs a mirror.
+ *
  * @module models/User
  */
 
@@ -16,22 +21,30 @@ const userSchema = new mongoose.Schema({
   username: {
     type: String,
     required: [true, "Username is required"],
-    unique: true,
     trim: true,
     match: [/^[a-zA-Z0-9_]{3,20}$/, "Invalid username format"],
+    // Partial unique — see the email field note below. Must match Phase2's
+    // declaration exactly or the next startup fights it with
+    // IndexOptionsConflict (Phase2's migrateAccountLifecycle.js swaps the
+    // old plain unique indexes for these).
+    index: { unique: true, partialFilterExpression: { deleted: false } },
   },
   email: {
     type: String,
     required: [true, "Email is required"],
-    unique: true,
     lowercase: true,
     trim: true,
     match: [/\S+@\S+\.\S+/, "A valid email is required"],
+    // Unique ONLY among live accounts: soft-deleted users must not block
+    // re-registration with the same email. Options mirror Phase2
+    // user.model.js — keep them in lockstep.
+    index: { unique: true, partialFilterExpression: { deleted: false } },
   },
   password: {
     type: String,
     required: [true, "Password is required"],
     minlength: 6,
+    maxlength: 72, // bcrypt truncates beyond 72 bytes (Phase2 parity)
     select: false,
   },
   avatar: {
@@ -78,11 +91,16 @@ const userSchema = new mongoose.Schema({
     default: false,
   },
   // ── Account moderation (written here, enforced by Phase2 auth) ──
-  // banned: cannot log in at all. suspended: temporarily locked out.
-  // Phase2's login/refresh/submission flows check this on every request.
+  // banned: permanent block. suspended: temporary block. Phase2 checks this
+  // on every login, every token refresh AND every authenticated request, so
+  // bans land within seconds rather than the old 15-min JWT window.
+  // deletion_pending: deletion scheduled (self-service or admin) — Phase2
+  // blocks every route except the cancel-deletion flow.
+  // deleted: legacy soft-delete value kept for Phase2 compatibility — its
+  // migration backfills old `deleted:true` accounts to this status.
   accountStatus: {
     type: String,
-    enum: ['active', 'suspended', 'banned'],
+    enum: ['active', 'suspended', 'banned', 'deletion_pending', 'deleted'],
     default: 'active',
   },
   statusReason: {
@@ -104,6 +122,25 @@ const userSchema = new mongoose.Schema({
     type: Date,
     default: null,
   },
+  // ── Deletion lifecycle (mirrors Phase2 user.model.js) ──
+  // deletionRequestedAt: when deletion was scheduled.
+  // scheduledPurgeAt: when Phase2's accountPurgeJob hard-purges the account.
+  //   restore/active paths MUST clear these or the reaper purges a
+  //   "restored" account on schedule.
+  // deletionReason: free-text reason captured at scheduling (≤500).
+  deletionRequestedAt: {
+    type: Date,
+    default: null,
+  },
+  scheduledPurgeAt: {
+    type: Date,
+    default: null,
+  },
+  deletionReason: {
+    type: String,
+    default: '',
+    maxlength: 500,
+  },
   verificationToken: String,
   verificationTokenExpires: Date,
   emailSendFailed: {
@@ -114,8 +151,8 @@ const userSchema = new mongoose.Schema({
   resetPasswordToken: String,
   resetPasswordExpires: Date,
   // Mirrors Phase2's auth session store (shared collection, Phase2 user.model
-  // ~line 328). Declared here so admin-side session wipes (logout-all, ban,
-  // delete) actually persist — Mongoose strict mode silently drops fields not
+  // refreshTokens field). Declared here so admin-side session wipes (logout-all,
+  // ban, delete) actually persist — Mongoose strict mode silently drops fields not
   // in the schema. The admin dashboard never issues tokens; it only displays
   // device labels and revokes. Field-for-field match, including `ip`.
   refreshTokens: [{
@@ -162,8 +199,7 @@ const userSchema = new mongoose.Schema({
     contestId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Contests",
-      required: true,
-      index: true
+      required: true
     },
     appliedAt: {
       type: Date,
@@ -276,6 +312,11 @@ const userSchema = new mongoose.Schema({
   },
 }, { timestamps: true });
 
+// accountPurgeJob (Phase2) scans for accounts whose grace period has ended;
+// the compound index keeps that query a fast prefix scan. Mirrored from
+// Phase2 user.model.js so both apps declare identical indexes.
+userSchema.index({ accountStatus: 1, scheduledPurgeAt: 1 });
+
 /**
  * Pre-save hook to hash password before storing
  * Only runs if password is modified
@@ -290,7 +331,7 @@ userSchema.pre("save", async function () {
 
 /**
  * Compares a candidate password with the stored hashed password
- * 
+ *
  * @param {string} candidatePassword - The password to verify
  * @returns {Promise<boolean>} True if password matches, false otherwise
  */

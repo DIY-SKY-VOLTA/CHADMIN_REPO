@@ -2,7 +2,37 @@ const User = require('../models/User');
 const BlogSubmission = require('../models/BlogSubmission');
 const Comment = require('../models/Comment');
 const ActivityLog = require('../models/ActivityLog');
+const DeletionEvent = require('../models/DeletionEvent');
 const { logAction } = require('./activityLogController');
+
+// ── Deletion lifecycle (Phase2 integration) ──────────────────────────────
+// Phase2 (main app) runs an hourly accountPurgeJob whose work queue IS the
+// deletionevents collection: any event with phase ∈ {scheduled,
+// failed_partial} and scheduledPurgeAt ≤ now gets the full cascade executed
+// (Sanity posts erased, comments anonymized, likes/views/notifications/push
+// subscriptions/images cleaned, user doc removed — idempotent, with retry).
+// The dashboard therefore never hard-deletes directly: it schedules an event
+// and lets the reaper do the destructive work.
+const GRACE_DAYS = 30;
+const purgeDateLabel = (d) =>
+  new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+
+// Clear the reaper's appointment fields (restore/cancel paths MUST call this
+// or Phase2's purge job deletes the account on schedule while the dashboard
+// shows it as active).
+const clearDeletionFields = (user) => {
+  user.deletionRequestedAt = null;
+  user.scheduledPurgeAt = null;
+  user.deletionReason = '';
+};
+
+// Mark every open scheduled event for a user as cancelled (the trail keeps
+// the row; Phase2's reaper stops seeing it).
+const cancelOpenDeletionEvents = (userId) =>
+  DeletionEvent.updateMany(
+    { userId, phase: 'scheduled' },
+    { $set: { phase: 'cancelled', cancelledAt: new Date() } }
+  );
 
 exports.listUsers = async (req, res) => {
   try {
@@ -23,6 +53,11 @@ exports.listUsers = async (req, res) => {
     // Filter by role
     if (role === 'banned') {
       query.accountStatus = { $in: ['banned', 'suspended'] };
+    } else if (role === 'pending_deletion') {
+      // Accounts scheduled for deletion (self-service has deleted=false,
+      // admin-scheduled has deleted=true) — visible until cancelled or purged.
+      query.accountStatus = 'deletion_pending';
+      delete query.deleted;
     } else if (role === 'admins') {
       query.isAdmin = true;
     } else if (role === 'verified') {
@@ -296,8 +331,11 @@ exports.getWriterStats = async (req, res) => {
 /**
  * PUT /users/:id/status
  * Ban or suspend an account. Phase2's auth layer checks accountStatus on
- * every login AND every token refresh, so bans take effect within minutes
- * even for users with valid sessions (JWTs expire after 15 minutes).
+ * EVERY request (login, refresh, and per-request middleware), so bans land
+ * within seconds even for users with open sessions.
+ * Restoring ('active') a pending-deletion account cancels the scheduled
+ * purge — deletion_pending/deleted themselves are managed by the deletion
+ * lifecycle (DELETE /:id schedules, /:id/restore cancels).
  * Body: { status: 'banned' | 'suspended' | 'active', reason?: string }
  */
 exports.setAccountStatus = async (req, res) => {
@@ -319,9 +357,23 @@ exports.setAccountStatus = async (req, res) => {
       return res.status(400).json({ success: false, message: 'You cannot change your own account status' });
     }
 
+    const previousStatus = user.accountStatus;
+
+    // Restoring a pending-deletion account is a full lifecycle cancellation:
+    // unlock the login lock AND clear the reaper's appointment, or Phase2's
+    // purge job deletes the account on schedule while the dashboard shows
+    // "active".
+    if (status === 'active' && previousStatus === 'deletion_pending') {
+      user.deleted = false;
+      user.deletedAt = null;
+      clearDeletionFields(user);
+      await cancelOpenDeletionEvents(user._id);
+    }
+
     user.accountStatus = status;
     user.statusReason = status === 'active' ? '' : String(reason || '').slice(0, 300);
     user.statusChangedAt = new Date();
+    if (status !== 'active') user.refreshTokens = [];
     await user.save({ validateModifiedOnly: true });
 
     logAction({
@@ -348,13 +400,15 @@ exports.setAccountStatus = async (req, res) => {
 };
 
 /**
- * DELETE /users/:id
- * Soft-delete a user account. The document is kept (blog submissions and
- * comments keep their author references and stats) but the user vanishes
- * from every list and can never log in again.
+ * DELETE /users/:id — schedule a deletion through the lifecycle.
+ *
+ * The account locks immediately (deleted=true blocks login entirely, no
+ * self-service cancel) and Phase2's hourly reaper executes the full cascade
+ * after the 30-day grace period: Sanity posts erased, comments anonymized as
+ * "[Deleted User]" (threads preserved), likes/views/notifications/push
+ * subscriptions/images cleaned, user doc removed. A DeletionEvent row is the
+ * auditable work-queue entry.
  * Refuses: admins, already-deleted users, and self-delete.
- * Anonymous orphan comments (userId with no author name) are blanked so
- * they show as [deleted user].
  */
 exports.deleteUser = async (req, res) => {
   try {
@@ -377,33 +431,47 @@ exports.deleteUser = async (req, res) => {
       Comment.countDocuments({ userId: id, isDeleted: { $ne: true } }),
     ]);
 
+    // ── Schedule the deletion (Phase2 lifecycle) ──
+    const now = new Date();
+    const scheduledPurgeAt = new Date(now.getTime() + GRACE_DAYS * 24 * 60 * 60 * 1000);
+    const reason = String(req.body?.reason || 'Admin-scheduled deletion').slice(0, 500);
+
     user.deleted = true;
-    user.deletedAt = new Date();
-    user.accountStatus = 'banned';
-    user.statusReason = user.statusReason || 'Account deleted by admin';
+    user.deletedAt = now;
+    user.accountStatus = 'deletion_pending';
+    user.statusReason = `Admin-scheduled deletion: ${reason.slice(0, 280)}`;
+    user.deletionRequestedAt = now;
+    user.scheduledPurgeAt = scheduledPurgeAt;
+    user.deletionReason = reason;
     user.refreshTokens = [];
     await user.save({ validateModifiedOnly: true });
 
-    // Their anonymous comments lose the author linkage — content stays for
-    // thread integrity but shows as removed-user rather than a live account.
-    await Comment.updateMany(
-      { userId: id, $or: [{ name: { $exists: false } }, { name: null }, { name: '' }] },
-      { $set: { name: '[deleted user]' } }
-    );
+    // Work-queue row — Phase2's accountPurgeJob picks this up once the grace
+    // period ends and runs executePurge (idempotent, with retry).
+    const event = await DeletionEvent.create({
+      userId: user._id,
+      userEmail: user.email,
+      username: user.username,
+      trigger: 'admin',
+      actorId: req.admin.id,
+      reason,
+      phase: 'scheduled',
+      scheduledPurgeAt,
+    });
 
     logAction({
       adminId: req.admin.id,
       adminName: req.admin.username || req.admin.id,
       action: 'delete_user',
-      description: `Soft-deleted account "${user.username}" (${submissions} blog submissions, ${comments} comments kept for record)`,
+      description: `Scheduled deletion of "${user.username}" — purge on ${purgeDateLabel(scheduledPurgeAt)} (${submissions} blog submissions, ${comments} comments in scope)`,
       targetId: id,
       targetType: 'user',
-      metadata: { username: user.username, submissions, comments },
+      metadata: { username: user.username, submissions, comments, scheduledPurgeAt, eventId: event._id },
     });
 
     res.json({
       success: true,
-      message: `${user.username} deleted. Their ${submissions} blog submission(s) and ${comments} comment(s) remain for the record.`,
+      message: `${user.username} scheduled for deletion on ${purgeDateLabel(scheduledPurgeAt)} (30-day grace — restore cancels). At purge: ${submissions} blog submission(s) erased, ${comments} comment(s) anonymized.`,
     });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -452,8 +520,10 @@ exports.listDeletedUsers = async (req, res) => {
 
 /**
  * POST /users/:id/restore
- * Undo a soft delete — the account becomes visible and can log in again
- * (any previous ban still applies and must be lifted separately).
+ * Undo a soft delete — the account becomes visible again. For an account
+ * scheduled for deletion this is ALSO the cancel: the reaper's appointment
+ * is cleared and open DeletionEvents are marked cancelled (a pre-existing
+ * ban still applies and must be lifted separately).
  */
 exports.restoreUser = async (req, res) => {
   try {
@@ -465,39 +535,56 @@ exports.restoreUser = async (req, res) => {
       return res.status(400).json({ success: false, message: 'User is not deleted' });
     }
 
+    const wasPending = user.accountStatus === 'deletion_pending';
+
     user.deleted = false;
     user.deletedAt = undefined;
+    // Restore doubles as the CANCEL path for a scheduled deletion: clear the
+    // reaper's appointment, or Phase2's purge job deletes this account on
+    // schedule even though the dashboard shows it as active.
+    clearDeletionFields(user);
+    if (wasPending) {
+      user.accountStatus = 'active';
+      user.statusReason = '';
+      user.statusChangedAt = new Date();
+      await cancelOpenDeletionEvents(user._id);
+    }
     await user.save({ validateModifiedOnly: true });
 
     logAction({
       adminId: req.admin.id,
       adminName: req.admin.username || req.admin.id,
       action: 'restore_user',
-      description: `Restored deleted account "${user.username}"`,
+      description: wasPending
+        ? `Restored "${user.username}" and CANCELLED the scheduled deletion (purge aborted)`
+        : `Restored deleted account "${user.username}"`,
       targetId: id,
       targetType: 'user',
-      metadata: { username: user.username },
+      metadata: { username: user.username, cancelledDeletion: wasPending },
     });
 
-    res.json({ success: true, message: `${user.username} restored — the account is active again.` });
+    res.json({
+      success: true,
+      message: wasPending
+        ? `${user.username} restored — scheduled deletion cancelled, the account is active again.`
+        : `${user.username} restored — the account is active again.`,
+    });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
 /**
- * DELETE /users/:id/purge — HARD delete (permanent removal).
+ * DELETE /users/:id/purge — immediate lifecycle purge (legacy escape hatch).
  *
- * Production flow for cleaning up test accounts: removes the User document
- * from MongoDB and the user's comments. Guards, in order:
- *
- *  - Admin accounts can never be purged (revoke admin first).
- *  - You cannot purge your own account.
- *  - Accounts with ANY blog submissions are refused — use soft delete for
- *    real users; their content history must never be destroyed.
- *
- * Soft delete stays the DEFAULT: purge is only reachable from the Deleted
- * view after an explicit typed confirmation.
+ * Prefer DELETE /:id (schedules the cascade with a 30-day grace + cancel
+ * window). This endpoint exists for the Deleted-view's typed-confirmation
+ * flow on test/spam accounts where waiting out the grace period is
+ * pointless: instead of deleting directly (which used to orphan comments,
+ * likes, notifications, push subscriptions and Sanity posts), it moves the
+ * account's scheduledPurgeAt to NOW and lets Phase2's reaper execute the
+ * full cascade within the hour — with retry and an audit trail.
+ * Guards unchanged: no admins, no self-purge.
  */
 exports.purgeUser = async (req, res) => {
   try {
@@ -512,34 +599,68 @@ exports.purgeUser = async (req, res) => {
       return res.status(400).json({ success: false, message: 'You cannot purge your own account' });
     }
 
-    const submissions = await BlogSubmission.countDocuments({ 'author.userId': id });
-    if (submissions > 0) {
-      return res.status(400).json({
-        success: false,
-        message: `${user.username} has ${submissions} blog submission(s) — content-bearing accounts cannot be purged. Use soft delete instead.`,
+    // Content-bearing accounts ARE purgeable here (typed confirmation on the
+    // frontend is the gate) — the cascade handles their content properly.
+    const now = new Date();
+    const existingEvent = await DeletionEvent.findOne({ userId: id, phase: 'scheduled' });
+
+    if (user.accountStatus === 'deletion_pending' && existingEvent) {
+      // Already scheduled → expedite: pull the purge date to now.
+      existingEvent.scheduledPurgeAt = now;
+      await existingEvent.save();
+      await User.findByIdAndUpdate(id, { $set: { scheduledPurgeAt: now } });
+      logAction({
+        adminId: req.admin.id,
+        adminName: req.admin.username || req.admin.id,
+        action: 'purge_user',
+        description: `EXPEDITED scheduled deletion of "${user.username}" (${user.email}) — purge moved to now`,
+        targetId: id,
+        targetType: 'user',
+        metadata: { username: user.username, email: user.email, expedited: true, eventId: existingEvent._id },
+      });
+      return res.json({
+        success: true,
+        message: `${user.username}'s deletion expedited — the cascade (posts erased, comments anonymized, references cleaned) runs within the hour.`,
       });
     }
 
-    const comments = await Comment.countDocuments({ userId: id });
-
-    await Promise.all([
-      User.findByIdAndDelete(id),
-      Comment.deleteMany({ userId: id }),
-    ]);
+    // Not scheduled yet (legacy soft-delete or live account) → schedule with
+    // an immediate purge date so the reaper picks it up on the next run.
+    const event = await DeletionEvent.create({
+      userId: user._id,
+      userEmail: user.email,
+      username: user.username,
+      trigger: 'admin',
+      actorId: req.admin.id,
+      reason: 'Immediate purge via admin dashboard',
+      phase: 'scheduled',
+      scheduledPurgeAt: now,
+    });
+    await User.findByIdAndUpdate(id, {
+      $set: {
+        accountStatus: 'deletion_pending',
+        deleted: true,
+        deletedAt: user.deletedAt || now,
+        deletionRequestedAt: now,
+        scheduledPurgeAt: now,
+        deletionReason: 'Immediate purge via admin dashboard',
+      },
+      $unset: { refreshTokens: 1 },
+    });
 
     logAction({
       adminId: req.admin.id,
       adminName: req.admin.username || req.admin.id,
       action: 'purge_user',
-      description: `PERMANENTLY removed account "${user.username}" (${user.email}) and ${comments} comment(s) from the database`,
+      description: `Scheduled IMMEDIATE purge of "${user.username}" (${user.email}) — Phase2 cascade runs within the hour`,
       targetId: id,
       targetType: 'user',
-      metadata: { username: user.username, email: user.email, purgedComments: comments },
+      metadata: { username: user.username, email: user.email, eventId: event._id },
     });
 
     res.json({
       success: true,
-      message: `${user.username} permanently removed from the database (${comments} comment(s) deleted).`,
+      message: `${user.username} scheduled for immediate purge — the cascade runs within the hour (posts erased, comments anonymized, references cleaned).`,
     });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -549,8 +670,9 @@ exports.purgeUser = async (req, res) => {
 /**
  * POST /users/:id/logout-all
  * Kick every active session for a user by revoking all refresh tokens.
- * Their current JWT dies within ≤15 minutes (access-token lifetime), so
- * the user is fully signed out everywhere within that window. Non-destructive:
+ * Phase2's per-request status check runs on every authenticated call, and
+ * access tokens themselves are short-lived — so revocation is effectively
+ * immediate. Non-destructive:
  * they can simply log back in. For banned/suspended/deleted users the
  * moderation gates already revoke tokens — this covers live/active users
  * (e.g. a compromised account that shouldn't be banned outright).
@@ -582,7 +704,7 @@ exports.logoutAllSessions = async (req, res) => {
     res.json({
       success: true,
       message: hadSessions > 0
-        ? `${user.username} signed out of ${hadSessions} session(s) — takes effect within 15 minutes`
+        ? `${user.username} signed out of ${hadSessions} session(s) — blocked immediately by the per-request status check`
         : `${user.username} had no active sessions`,
       revokedSessions: hadSessions,
     });
@@ -595,7 +717,8 @@ exports.logoutAllSessions = async (req, res) => {
  * POST /users/bulk
  * Bulk moderation in one call. Actions mirror the single-user endpoints so
  * guards stay identical: admins are skipped (never banned/tiered/deleted),
- * self is refused outright, deletes are soft, every action is activity-logged.
+ * self is refused outright, deletes schedule a lifecycle deletion (30-day
+ * grace, cancel via restore), every action is activity-logged.
  * Body: { ids: string[], action: 'ban'|'suspend'|'restore'|'logout_all'|'delete'
  *               tier?: 'new'|'verified'|'trusted'|'' (when action='set_tier'),
  *               reason?: string }
@@ -630,12 +753,25 @@ exports.bulkUserAction = async (req, res) => {
         if (!user) { results.failed.push({ id, reason: 'not found' }); continue; }
         if (user.isAdmin) { results.skippedAdmins.push(user.username); continue; }
         if (user.deleted && action !== 'delete') { results.failed.push({ id, reason: 'already deleted' }); continue; }
+        if (action === 'delete' && user.accountStatus === 'deletion_pending') {
+          results.failed.push({ id, reason: 'already scheduled for deletion' });
+          continue;
+        }
 
         switch (action) {
           case 'ban':
           case 'suspend':
           case 'restore': {
             const status = action === 'ban' ? 'banned' : action === 'suspend' ? 'suspended' : 'active';
+            const previous = user.accountStatus;
+            // Restore of a pending-deletion account cancels the scheduled
+            // purge (same semantics as the single-user restore endpoint).
+            if (status === 'active' && previous === 'deletion_pending') {
+              user.deleted = false;
+              user.deletedAt = undefined;
+              clearDeletionFields(user);
+              await cancelOpenDeletionEvents(user._id);
+            }
             user.accountStatus = status;
             user.statusReason = status === 'active' ? '' : String(reason || '').slice(0, 300);
             user.statusChangedAt = new Date();
@@ -656,16 +792,28 @@ exports.bulkUserAction = async (req, res) => {
             break;
           case 'delete': {
             if (user.deleted) { results.failed.push({ id, reason: 'already deleted' }); continue; }
+            const now = new Date();
+            const scheduledPurgeAt = new Date(now.getTime() + GRACE_DAYS * 24 * 60 * 60 * 1000);
+            const deleteReason = String(reason || 'Admin-scheduled deletion (bulk)').slice(0, 500);
             user.deleted = true;
-            user.deletedAt = new Date();
-            user.accountStatus = 'banned';
-            user.statusReason = user.statusReason || 'Account deleted by admin';
+            user.deletedAt = now;
+            user.accountStatus = 'deletion_pending';
+            user.statusReason = `Admin-scheduled deletion: ${deleteReason.slice(0, 280)}`;
+            user.deletionRequestedAt = now;
+            user.scheduledPurgeAt = scheduledPurgeAt;
+            user.deletionReason = deleteReason;
             user.refreshTokens = [];
             await user.save({ validateModifiedOnly: true });
-            await Comment.updateMany(
-              { userId: id, $or: [{ name: { $exists: false } }, { name: null }, { name: '' }] },
-              { $set: { name: '[deleted user]' } }
-            );
+            await DeletionEvent.create({
+              userId: user._id,
+              userEmail: user.email,
+              username: user.username,
+              trigger: 'admin',
+              actorId: req.admin.id,
+              reason: deleteReason,
+              phase: 'scheduled',
+              scheduledPurgeAt,
+            });
             break;
           }
         }
