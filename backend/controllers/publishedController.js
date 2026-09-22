@@ -24,7 +24,9 @@ exports.listPublished = async (req, res) => {
       category: 'Blog',
       tags: sp.tags || [],
       status: 'approved',
-      author: { name: sp.authorName || 'Sanity Admin' }, // Default for sanity-only
+      // Sanity posts carry the author as a plain string (see getAllSanityPosts);
+      // an honest unknown beats inventing an author.
+      author: { name: sp.authorName || 'Unknown Author' },
       sanityId: sp._id,
       sanityUrl: `https://${process.env.SANITY_PROJECT_ID}.api.sanity.io/v2024-01-01/data/query/${process.env.SANITY_DATASET}?query=*[_id=='${sp._id}'][0]`,
       readTime: sp.readTime || '5 min read',

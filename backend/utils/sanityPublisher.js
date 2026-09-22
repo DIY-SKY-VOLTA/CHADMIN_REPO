@@ -277,6 +277,14 @@ async function publishToSanity(submission) {
       title: submission.metaTitle || submission.title,
       description: submission.metaDescription || submission.excerpt || '',
     },
+    // Mirror Phase2's buildPostMetadata: the public site resolves authors from
+    // the plain authorName string, not an author reference. Without it the
+    // published post renders as anonymous on both sites.
+    authorName: submission.author?.name || 'Contributor',
+    authorUserId: submission.author?.userId?.toString() || '',
+    authorBio: submission.author?.bio || '',
+    authorAvatar: submission.author?.avatar || '',
+    status: 'approved',
   };
 
   if (submission.coverImage) {
@@ -371,10 +379,13 @@ function autoGenerateExcerpt(content, maxLength = 200) {
 async function getAllSanityPosts() {
   if (!SANITY_TOKEN) return [];
   try {
-    // Exclude Sanity drafts: unpublished docs live under the `drafts.` path.
-    // Without this filter, Studio drafts leaked into the admin Published list
-    // and were rendered with the LIVE badge.
-    const posts = await sanityClient.fetch(`*[_type == "post" && !(_id in path("drafts.**"))] | order(_createdAt desc) {
+    // Mirror the public site's visibility rule (Phase2 blogProxy):
+    //   status == 'approved' OR no status field (legacy/Studio-created posts).
+    // Sanity *drafts* (drafts.* ids) are excluded too. Phase2's pipeline stores
+    // pending/draft submissions as published dataset docs with a workflow
+    // `status` field — without this filter those leaked into the Live list
+    // with a LIVE badge even though the public site never renders them.
+    const posts = await sanityClient.fetch(`*[_type == "post" && !(_id in path("drafts.**")) && (!defined(status) || status == "approved")] | order(_createdAt desc) {
       _id,
       title,
       "slug": slug.current,
@@ -385,7 +396,9 @@ async function getAllSanityPosts() {
       "coverImage": mainImage.asset->url,
       "tags": tags,
       readTime,
-      "authorName": author->name
+      // Phase2 writes the author as a plain string (authorName), Studio-era
+      // posts use a reference — prefer the string, fall back to the deref.
+      "authorName": coalesce(authorName, author->name)
     }`);
     return posts;
   } catch (err) {

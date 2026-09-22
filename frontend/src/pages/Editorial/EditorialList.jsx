@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
-import { 
-  FileText, 
-  CheckCircle, 
-  XCircle, 
+import {
+  FileText,
+  CheckCircle,
+  XCircle,
   Clock,
   AlertTriangle,
   Search,
@@ -10,7 +10,10 @@ import {
   ChevronLeft,
   ChevronRight,
   Trash2,
-  Loader2
+  Loader2,
+  Users,
+  Inbox,
+  X
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
@@ -26,9 +29,9 @@ const getStatusConfig = (status) => ({
 })[status] || { label: status, icon: FileText, color: '#737373', bg: 'bg-neutral-50 dark:bg-[#18181a] border-neutral-200 dark:border-white/5' };
 
 const tabs = [
-  { key: 'pending',  label: 'Pending Review',  icon: Clock },
-  { key: 'approved', label: 'Approved Queue', icon: CheckCircle },
-  { key: 'rejected', label: 'Rejected Queue', icon: XCircle },
+  { key: 'pending',  label: 'Pending Review',  icon: Clock,       plural: 'awaiting review' },
+  { key: 'approved', label: 'Approved Queue',  icon: CheckCircle, plural: 'approved posts' },
+  { key: 'rejected', label: 'Rejected Queue',  icon: XCircle,     plural: 'rejected posts' },
 ];
 
 const pageVariants = {
@@ -43,6 +46,7 @@ const itemVariants = {
 
 const EditorialList = () => {
   const [submissions, setSubmissions] = useState([]);
+  const [stats, setStats] = useState(null);
   const [activeTab, setActiveTab] = useState('pending');
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
@@ -52,10 +56,15 @@ const EditorialList = () => {
   // Pending permanent delete — { _id, title } renders the typed-confirmation dialog
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  // Pending rejection — { _id, title } renders the feedback dialog (required by the API)
+  const [rejectTarget, setRejectTarget] = useState(null);
+  const [rejectFeedback, setRejectFeedback] = useState('');
+  const [isRejecting, setIsRejecting] = useState(false);
   const navigate = useNavigate();
 
   useEffect(() => {
     fetchSubmissions();
+    fetchStats();
   }, [activeTab, page]);
 
   const fetchSubmissions = async () => {
@@ -64,7 +73,7 @@ const EditorialList = () => {
       const res = await adminAPI.get(`/blogs/${activeTab}?page=${page}&limit=30`);
       if (res.success) {
         const rawSubmissions = res.submissions || [];
-        
+
         // Detect duplicates based on identical titles (case-insensitive)
         const titleCounts = {};
         rawSubmissions.forEach(sub => {
@@ -88,13 +97,49 @@ const EditorialList = () => {
     }
   };
 
+  const fetchStats = async () => {
+    try {
+      const res = await adminAPI.get('/blogs/dashboard/stats');
+      if (res.success) setStats(res.stats);
+    } catch {
+      // stats are optional — the queue works without them
+    }
+  };
+
   const handleQuickAction = async (id, action) => {
+    if (action === 'reject') {
+      // The API requires feedback for rejections — collect it in a dialog
+      setRejectTarget(submissions.find(s => s._id === id) || null);
+      setRejectFeedback('');
+      return;
+    }
     try {
       await adminAPI.post(`/blogs/submissions/${id}/${action}`, {});
-      toast.success(action === 'approve' ? 'Approved!' : 'Rejected');
+      toast.success('Approved and published');
       fetchSubmissions();
-    } catch {
-      toast.error('Action failed');
+      fetchStats();
+    } catch (err) {
+      toast.error(err?.message || 'Action failed');
+    }
+  };
+
+  const handleRejectConfirm = async () => {
+    if (!rejectTarget) return;
+    setIsRejecting(true);
+    try {
+      const res = await adminAPI.post(`/blogs/submissions/${rejectTarget._id}/reject`, {
+        feedback: rejectFeedback.trim(),
+      });
+      toast.success(res.message || 'Rejected with feedback');
+      setRejectTarget(null);
+      setRejectFeedback('');
+      setExpandedId(null);
+      fetchSubmissions();
+      fetchStats();
+    } catch (err) {
+      toast.error(err?.message || 'Rejection failed');
+    } finally {
+      setIsRejecting(false);
     }
   };
 
@@ -111,6 +156,7 @@ const EditorialList = () => {
       setDeleteTarget(null);
       setExpandedId(null);
       fetchSubmissions();
+      fetchStats();
     } catch (err) {
       toast.error(err?.message || 'Delete failed');
     } finally {
@@ -133,61 +179,106 @@ const EditorialList = () => {
     );
   });
 
+  const activeTabMeta = tabs.find(t => t.key === activeTab);
+  const statCards = stats ? [
+    { label: 'Awaiting Review', value: stats.pending,  icon: Inbox,        tone: 'text-amber-600 dark:text-amber-500 bg-amber-500/10', tab: 'pending' },
+    { label: 'Approved Posts',  value: stats.approved, icon: CheckCircle,  tone: 'text-emerald-600 dark:text-emerald-500 bg-emerald-500/10', tab: 'approved' },
+    { label: 'Rejected Posts',  value: stats.rejected, icon: XCircle,      tone: 'text-red-600 dark:text-red-500 bg-red-500/10', tab: 'rejected' },
+    { label: 'Contributors',    value: stats.authors,  icon: Users,        tone: 'text-blue-600 dark:text-blue-500 bg-blue-500/10', tab: null },
+  ] : null;
+
   return (
-    <div className="h-full flex flex-col bg-neutral-50/30 dark:bg-[#0d0d0f]/20">
-      
-      {/* Header bar */}
+    <div className="h-full flex flex-col bg-neutral-50/30 dark:bg-[#0d0d0f]/20 selection:bg-neutral-200/50 dark:selection:bg-neutral-400/40">
+
+      {/* Header */}
       <div className="shrink-0 flex items-center justify-between px-6 py-4 border-b border-neutral-200/50 dark:border-white/5 bg-white/40 dark:bg-[#121214]/40 backdrop-blur-sm">
         <div>
-          <h1 className="text-base font-semibold text-neutral-900 dark:text-neutral-100 flex items-center gap-2">
-            Review Submissions
+          <h1 className="text-xl font-semibold tracking-tight text-neutral-900 dark:text-neutral-100">
+            Editorial Queue
           </h1>
-          <p className="text-[11px] text-neutral-400 dark:text-neutral-500 mt-0.5">
-            Audit draft articles in the submission queue, check duplicates, and process editorial actions
+          <p className="text-xs text-neutral-400 dark:text-neutral-500 mt-0.5">
+            {stats?.pending > 0
+              ? `${stats.pending} ${stats.pending === 1 ? 'submission' : 'submissions'} awaiting review`
+              : 'Audit submissions, check duplicates, and process editorial actions'}
           </p>
         </div>
-        
-        <button 
+
+        <button
           onClick={() => navigate('/posts')}
-          className="p-1.5 rounded-lg border border-neutral-200/50 dark:border-white/5 bg-white dark:bg-[#18181b] hover:bg-neutral-50 dark:hover:bg-white/5 text-neutral-500 hover:text-neutral-900 dark:hover:text-white transition-all shadow-sm flex items-center gap-1.5 text-[11px] font-medium"
+          className="p-2 rounded-lg border border-neutral-200/50 dark:border-white/5 bg-white dark:bg-[#18181b] hover:bg-neutral-50 dark:hover:bg-white/5 text-neutral-600 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-white transition-all shadow-sm flex items-center gap-1.5 text-xs font-medium"
         >
-          <BookOpen size={12} />
+          <BookOpen size={13} />
           View All Posts
         </button>
       </div>
 
+      {/* Stat cards — live counts from the dashboard stats endpoint */}
+      {statCards && (
+        <div className="shrink-0 p-6 pb-0 grid grid-cols-2 lg:grid-cols-4 gap-4">
+          {statCards.map(({ label, value, icon: Icon, tone, tab }) => (
+            <button
+              key={label}
+              type="button"
+              onClick={() => tab && handleTabChange(tab)}
+              disabled={!tab}
+              className={`bg-white dark:bg-[#151518]/70 border border-neutral-200/40 dark:border-white/5 p-4 rounded-xl shadow-[0_1px_3px_rgba(0,0,0,0.02)] flex items-center justify-between transition-all text-left ${
+                tab ? 'hover:border-neutral-300 dark:hover:border-neutral-800' : 'cursor-default'
+              } ${activeTab === tab ? 'border-neutral-400 dark:border-neutral-700 ring-1 ring-neutral-900/5 dark:ring-white/5' : ''}`}
+            >
+              <div className="space-y-1">
+                <span className="text-[11px] font-semibold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider">{label}</span>
+                <p className="text-2xl font-semibold tracking-tight text-neutral-900 dark:text-neutral-100 leading-none">{value}</p>
+              </div>
+              <div className={`w-9 h-9 rounded-lg flex items-center justify-center ${tone}`}>
+                <Icon size={16} strokeWidth={1.5} />
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* Search & Segmented Filter Bar */}
       <div className="shrink-0 px-6 py-4 bg-white dark:bg-[#151518]/20 border-b border-neutral-200/50 dark:border-white/5 flex flex-col sm:flex-row gap-4 items-center justify-between">
-        
+
         {/* Search */}
         <div className="relative w-full sm:w-80">
-          <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
           <input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search by title, writer, category..."
-            className="w-full pl-8 pr-4 py-2 bg-neutral-100 dark:bg-[#18181b] border border-neutral-200/60 dark:border-white/5 focus:border-neutral-400 dark:focus:border-white/20 focus:outline-none rounded-lg text-xs text-neutral-900 dark:text-white placeholder-neutral-400/80 transition-colors shadow-inner"
+            placeholder="Search by title, author, category…"
+            className="w-full pl-9 pr-4 py-2 bg-white dark:bg-[#151518] border border-neutral-200/60 dark:border-white/5 focus:border-neutral-400 dark:focus:border-white/20 focus:ring-2 focus:ring-neutral-900/5 dark:focus:ring-white/5 focus:outline-none rounded-lg text-[13px] text-neutral-900 dark:text-white placeholder-neutral-400 transition-colors shadow-[0_1px_2px_rgba(0,0,0,0.01)]"
           />
         </div>
 
         {/* Tab Controls */}
-        <div className="flex p-0.5 bg-neutral-100 dark:bg-black/20 rounded-lg border border-neutral-200/30 dark:border-white/[0.02] w-full sm:w-auto overflow-x-auto shrink-0">
+        <div className="flex p-0.5 bg-neutral-200/50 dark:bg-neutral-950/60 rounded-lg border border-neutral-200/40 dark:border-white/5 w-full sm:w-auto overflow-x-auto shrink-0 shadow-inner">
           {tabs.map((tab) => {
             const StatusIcon = tab.icon;
             const isActive = activeTab === tab.key;
+            const count = stats ? stats[tab.key] : null;
             return (
               <button
                 key={tab.key}
                 onClick={() => handleTabChange(tab.key)}
-                className={`flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-3 py-1.5 text-[10px] font-bold uppercase rounded-md transition-all ${
+                className={`flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md transition-all ${
                   isActive
-                    ? 'bg-white dark:bg-[#1d1d22] text-neutral-900 dark:text-white shadow-sm border border-neutral-200/40 dark:border-white/5'
-                    : 'text-neutral-550 hover:text-neutral-900 dark:hover:text-white border border-transparent'
+                    ? 'bg-white dark:bg-[#1b1b1e] text-neutral-900 dark:text-white shadow-sm'
+                    : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-white'
                 }`}
               >
-                <StatusIcon size={11} className={isActive ? 'text-neutral-800 dark:text-white' : 'text-neutral-450'} />
+                <StatusIcon size={12} strokeWidth={1.5} className={isActive ? 'text-neutral-800 dark:text-white' : 'text-neutral-400'} />
                 {tab.label}
+                {count != null && count > 0 && (
+                  <span className={`px-1.5 py-px rounded text-[10px] font-bold leading-4 ${
+                    isActive
+                      ? 'bg-neutral-900 dark:bg-white text-white dark:text-neutral-900'
+                      : 'bg-neutral-200/80 dark:bg-white/10 text-neutral-500 dark:text-neutral-400'
+                  }`}>
+                    {count > 99 ? '99+' : count}
+                  </span>
+                )}
               </button>
             );
           })}
@@ -201,7 +292,28 @@ const EditorialList = () => {
             {[...Array(5)].map((_, i) => (
               <div key={i} className="h-16 bg-white dark:bg-[#151518]/70 border border-neutral-200/40 dark:border-white/5 rounded-2xl p-4" />
             ))}
-          </div>          ) : (
+          </div>
+        ) : filteredSubmissions.length === 0 ? (
+          <div className="bg-white dark:bg-[#151518]/40 border border-neutral-200/40 dark:border-white/5 rounded-2xl flex flex-col items-center justify-center py-20 shadow-sm">
+            <FileText size={32} strokeWidth={1.5} className="text-neutral-350 dark:text-neutral-600 mb-3" />
+            <p className="text-sm font-semibold text-neutral-800 dark:text-neutral-300">
+              {searchQuery
+                ? 'No matching submissions'
+                : activeTab === 'pending'
+                ? 'Queue is clear'
+                : `No ${activeTabMeta?.plural || 'posts'} yet`}
+            </p>
+            <p className="text-xs text-neutral-400 mt-1">
+              {searchQuery
+                ? 'Try a different search term.'
+                : activeTab === 'pending'
+                ? 'New submissions from writers will appear here for review.'
+                : activeTab === 'approved'
+                ? 'Approved posts move to Live Posts once published.'
+                : 'Rejected submissions are kept here with feedback.'}
+            </p>
+          </div>
+        ) : (
           <>
             <motion.div
               className="space-y-3"
@@ -212,16 +324,21 @@ const EditorialList = () => {
               <AnimatePresence mode="popLayout">
                 {filteredSubmissions.map((item) => {
                   const config = getStatusConfig(item.status);
+                  const isExpanded = expandedId === item._id;
                   return (
                     <motion.div
                       key={item._id}
                       layout
                       variants={itemVariants}
                       exit={{ opacity: 0, y: -8 }}
-                      className="group bg-white dark:bg-[#151518]/70 border border-neutral-200/40 dark:border-white/5 hover:border-neutral-350 dark:hover:border-neutral-850 rounded-2xl overflow-hidden transition-all duration-300 shadow-[0_1px_3px_rgba(0,0,0,0.01)]"
+                      className={`group bg-white dark:bg-[#151518]/70 border rounded-2xl overflow-hidden transition-all duration-300 shadow-[0_1px_3px_rgba(0,0,0,0.01)] ${
+                        isExpanded
+                          ? 'border-neutral-300 dark:border-neutral-800'
+                          : 'border-neutral-200/40 dark:border-white/5 hover:border-neutral-350 dark:hover:border-neutral-850'
+                      }`}
                     >
-                      <div 
-                        onClick={() => setExpandedId(expandedId === item._id ? null : item._id)}
+                      <div
+                        onClick={() => setExpandedId(isExpanded ? null : item._id)}
                         className="flex items-center gap-4 px-5 py-3.5 cursor-pointer select-none"
                       >
                         {/* Cover Thumbnail */}
@@ -238,43 +355,40 @@ const EditorialList = () => {
                         {/* Title / Author */}
                         <div className="flex-1 min-w-0">
                           <div className="flex flex-wrap items-center gap-2">
-                            <p className="text-xs font-bold text-neutral-800 dark:text-neutral-200 truncate group-hover:text-neutral-950 dark:group-hover:text-white transition-colors">
+                            <p className="text-[13px] font-semibold text-neutral-900 dark:text-neutral-200 truncate group-hover:text-neutral-950 dark:group-hover:text-white transition-colors">
                               {item.title}
                             </p>
-                            
+
                             {/* Duplicate Detection Alert Badge */}
                             {item.isDuplicate && activeTab === 'pending' && (
-                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-amber-500/10 border border-amber-550/20 text-[8.5px] font-bold text-amber-600 dark:text-amber-500 uppercase tracking-wider font-mono">
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-amber-500/10 border border-amber-550/20 text-[9px] font-bold text-amber-600 dark:text-amber-500 uppercase tracking-wider font-mono">
                                 <AlertTriangle size={9} />
                                 Possible Duplicate
                               </span>
                             )}
                           </div>
-                          <p className="text-[10px] text-neutral-400 dark:text-neutral-500 mt-0.5">
-                            by <span className="font-semibold text-neutral-500 dark:text-neutral-400">{item.author?.name || 'Unknown Writer'}</span>
+                          <p className="text-[11.5px] text-neutral-400 dark:text-neutral-500 mt-0.5">
+                            by <span className="font-semibold text-neutral-500 dark:text-neutral-400">{item.author?.name || 'Unknown author'}</span>
+                            <span className="mx-1.5 text-neutral-300 dark:text-neutral-700">·</span>
+                            {new Date(item.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
                           </p>
                         </div>
 
                         {/* Status badge */}
                         <span
-                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold tracking-wide uppercase shrink-0 border border-neutral-200/40 dark:border-white/5 ${config.bg}`}
+                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold tracking-wide uppercase shrink-0 border border-neutral-200/40 dark:border-white/5 ${config.bg}`}
                           style={{ color: config.color }}
                         >
                           {config.label}
                         </span>
 
-                        {/* Date */}
-                        <span className="text-[10px] font-mono text-neutral-450 dark:text-neutral-550 shrink-0 hidden sm:block">
-                          {new Date(item.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
-                        </span>
-
-                        <ChevronRight size={13} className={`text-neutral-400 dark:text-neutral-600 transition-transform duration-300 ${expandedId === item._id ? 'rotate-90' : ''} shrink-0`} />
+                        <ChevronRight size={14} className={`text-neutral-400 dark:text-neutral-600 transition-transform duration-300 ${isExpanded ? 'rotate-90' : ''} shrink-0`} />
                       </div>
 
                       {/* Expandable details drawer pane */}
                       <AnimatePresence>
-                        {expandedId === item._id && (
-                          <motion.div 
+                        {isExpanded && (
+                          <motion.div
                             initial={{ height: 0, opacity: 0 }}
                             animate={{ height: 'auto', opacity: 1 }}
                             exit={{ height: 0, opacity: 0 }}
@@ -282,39 +396,39 @@ const EditorialList = () => {
                           >
                             <div className="ml-16 p-4 bg-neutral-50 dark:bg-[#0c0c0e]/30 rounded-xl border border-neutral-200/50 dark:border-white/5 space-y-3.5">
                               {item.excerpt && (
-                                <p className="text-[10.5px] text-neutral-500 dark:text-neutral-400 leading-relaxed font-normal">
+                                <p className="text-xs text-neutral-500 dark:text-neutral-400 leading-relaxed font-normal">
                                   {item.excerpt}
                                 </p>
                               )}
-                              
-                              <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[9px] font-mono text-neutral-400 dark:text-neutral-500 pt-2 border-t border-neutral-200/40 dark:border-white/[0.03]">
+
+                              <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[10.5px] font-mono text-neutral-400 dark:text-neutral-500 pt-2 border-t border-neutral-200/40 dark:border-white/[0.03]">
                                 {item.readTime && <span>🕒 {item.readTime}</span>}
                                 {item.category && <span>📂 {item.category}</span>}
                                 {item.slug && <span>🔗 /{item.slug}</span>}
                               </div>
 
-                              <div className="flex gap-2.5 pt-1">
+                              <div className="flex flex-wrap gap-2.5 pt-1">
                                 <button
                                   onClick={(e) => { e.stopPropagation(); navigate(`/editorial/${item._id}`); }}
-                                  className="px-3.5 py-1.5 text-[10px] font-bold uppercase bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 hover:bg-neutral-800 dark:hover:bg-neutral-50 rounded-lg transition-colors shadow-sm"
+                                  className="px-3.5 py-2 text-xs font-semibold bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 hover:bg-neutral-800 dark:hover:bg-neutral-50 active:scale-[0.98] rounded-lg transition-all shadow-sm"
                                 >
                                   Review & Edit
                                 </button>
-                                
+
                                 {activeTab === 'pending' && (
                                   <>
                                     <button
                                       onClick={(e) => { e.stopPropagation(); handleQuickAction(item._id, 'approve'); }}
-                                      className="px-3.5 py-1.5 text-[10px] font-bold uppercase bg-emerald-600 dark:bg-emerald-500 text-white rounded-lg flex items-center gap-1.5 transition-colors shadow-sm"
+                                      className="px-3.5 py-2 text-xs font-semibold bg-emerald-600 dark:bg-emerald-500 text-white hover:bg-emerald-700 dark:hover:bg-emerald-400 active:scale-[0.98] rounded-lg flex items-center gap-1.5 transition-all shadow-sm"
                                     >
-                                      <CheckCircle size={11} />
+                                      <CheckCircle size={12} />
                                       Approve
                                     </button>
                                     <button
                                       onClick={(e) => { e.stopPropagation(); handleQuickAction(item._id, 'reject'); }}
-                                      className="px-3.5 py-1.5 text-[10px] font-bold uppercase bg-red-655 dark:bg-red-500 text-white rounded-lg flex items-center gap-1.5 transition-colors shadow-sm"
+                                      className="px-3.5 py-2 text-xs font-semibold bg-red-655 dark:bg-red-500 text-white hover:bg-red-700 dark:hover:bg-red-400 active:scale-[0.98] rounded-lg flex items-center gap-1.5 transition-all shadow-sm"
                                     >
-                                      <XCircle size={11} />
+                                      <XCircle size={12} />
                                       Reject
                                     </button>
                                   </>
@@ -324,10 +438,10 @@ const EditorialList = () => {
                                 <button
                                   onClick={(e) => { e.stopPropagation(); setDeleteTarget({ _id: item._id, title: item.title }); }}
                                   disabled={isDeleting}
-                                  className="px-3.5 py-1.5 text-[10px] font-bold uppercase border border-red-500/30 text-red-600 dark:text-red-400 hover:bg-red-500/10 rounded-lg flex items-center gap-1.5 transition-colors disabled:opacity-40 ml-auto"
+                                  className="px-3.5 py-2 text-xs font-semibold text-red-600 dark:text-red-400 bg-red-500/[0.06] border border-red-500/25 hover:bg-red-500/10 hover:border-red-500/40 active:scale-[0.98] rounded-lg flex items-center gap-1.5 transition-all disabled:opacity-40 ml-auto"
                                   title="Permanently remove this submission from the database"
                                 >
-                                  {isDeleting ? <Loader2 size={11} className="animate-spin" /> : <Trash2 size={11} />}
+                                  {isDeleting ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
                                   Delete
                                 </button>
                               </div>
@@ -343,33 +457,45 @@ const EditorialList = () => {
 
             {/* Pagination Footer */}
             {pagination && pagination.pages > 1 && (
-              <div className="shrink-0 px-4 py-4 border-t border-neutral-200/50 dark:border-white/5 bg-white/40 dark:bg-[#121214]/40 backdrop-blur-sm flex items-center justify-between transition-colors text-xs font-medium rounded-b-2xl mt-4">
-                <span className="text-[10px] font-semibold text-neutral-450 dark:text-neutral-550 font-mono">
+              <div className="flex items-center justify-center gap-3 px-4 py-6">
+                <button
+                  disabled={page <= 1}
+                  onClick={() => setPage(p => Math.max(1, p - 1))}
+                  className="p-1.5 rounded-lg border border-neutral-200/60 dark:border-white/5 bg-white dark:bg-[#151518] text-neutral-500 hover:text-neutral-900 dark:hover:text-white disabled:opacity-30 transition-all shadow-sm"
+                >
+                  <ChevronLeft size={13} />
+                </button>
+                <span className="text-[11px] font-medium text-neutral-500">
                   Page {pagination.page} of {pagination.pages}
                 </span>
-                
-                <div className="flex items-center gap-2">
-                  <button
-                    disabled={page <= 1}
-                    onClick={() => setPage(p => Math.max(1, p - 1))}
-                    className="p-1.5 rounded-lg bg-white dark:bg-[#18181b] border border-neutral-200/50 dark:border-white/5 text-neutral-550 hover:text-neutral-800 dark:hover:text-white disabled:opacity-30 disabled:cursor-not-allowed hover:bg-neutral-50 dark:hover:bg-white/5 transition-all shadow-sm"
-                  >
-                    <ChevronLeft size={13} />
-                  </button>
-                  
-                  <button
-                    disabled={page >= pagination.pages}
-                    onClick={() => setPage(p => Math.min(pagination.pages, p + 1))}
-                    className="p-1.5 rounded-lg bg-white dark:bg-[#18181b] border border-neutral-200/50 dark:border-white/5 text-neutral-550 hover:text-neutral-800 dark:hover:text-white disabled:opacity-30 disabled:cursor-not-allowed hover:bg-neutral-50 dark:hover:bg-white/5 transition-all shadow-sm"
-                  >
-                    <ChevronRight size={13} />
-                  </button>
-                </div>
+                <button
+                  disabled={page >= pagination.pages}
+                  onClick={() => setPage(p => Math.min(pagination.pages, p + 1))}
+                  className="p-1.5 rounded-lg border border-neutral-200/60 dark:border-white/5 bg-white dark:bg-[#151518] text-neutral-500 hover:text-neutral-900 dark:hover:text-white disabled:opacity-30 transition-all shadow-sm"
+                >
+                  <ChevronRight size={13} />
+                </button>
               </div>
             )}
           </>
         )}
       </div>
+
+      {/* Rejection feedback dialog — the API requires a reason */}
+      <ConfirmDialog
+        open={!!rejectTarget}
+        onClose={() => { if (!isRejecting) setRejectTarget(null); }}
+        onConfirm={handleRejectConfirm}
+        title={rejectTarget ? `Reject "${rejectTarget.title}"?` : ''}
+        intent="warn"
+        actionIcon="suspend"
+        confirmLabel="Reject"
+        inputLabel="Feedback (required — sent to the writer)"
+        inputPlaceholder="e.g. needs more original research and sources"
+        busy={isRejecting}
+      >
+        The writer is notified with your feedback. They can revise and resubmit — nothing is deleted.
+      </ConfirmDialog>
 
       {/* Permanent delete confirmation — requires typing DELETE */}
       <ConfirmDialog
