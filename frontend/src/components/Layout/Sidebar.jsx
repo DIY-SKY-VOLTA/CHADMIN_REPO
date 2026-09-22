@@ -72,6 +72,7 @@ const sections = [
         items: [
           { icon: CalendarDays, label: 'Events', path: '/events' },
           { icon: FileTextIcon, label: 'Event Details', path: '/events/details' },
+          { icon: ImageIcon, label: 'Event Images', path: '/events/images' },
           { icon: AlertTriangle, label: 'Review Queue', path: '/events/review-queue' },
           { icon: CalendarDays, label: 'Event Types', path: '/event-types' },
         ],
