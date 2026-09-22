@@ -56,7 +56,10 @@ const eventTypeSchema = new mongoose.Schema(
 
 eventTypeSchema.index({ sortOrder: 1, name: 1 });
 
-const EventType = mongoose.model('EventType', eventTypeSchema);
+// Collection renamed 2026-09: `eventtypes` → `eventcategories` (the Phase2
+// events module was renamed EventType→EventCategory; legacy `eventtypes` was
+// dropped by scripts/migrateTaxonomyFinal.js). Model name kept for API compat.
+const EventType = mongoose.model('EventType', eventTypeSchema, 'eventcategories');
 EventType.slugifyEventType = slugifyEventType;
 
 module.exports = EventType;

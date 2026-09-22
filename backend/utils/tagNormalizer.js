@@ -1203,7 +1203,7 @@ function normalizeTags(tags, category, filterKeys) {
  * @returns {object|null} Mongoose update object or null if no changes needed
  */
 function buildTagUpdate(doc) {
-  const rawCat = (doc.rawCategory || doc.category || '');
+  const rawCat = (doc.category || '');
   const canonical = mapCanonicalCategory(rawCat);
   const subCat = mapSubcategory(rawCat);
   const normalized = normalizeTags(
@@ -1216,13 +1216,11 @@ function buildTagUpdate(doc) {
   const newTags = normalized.sort();
   const tagsChanged = JSON.stringify(originalTags) !== JSON.stringify(newTags);
 
-  const needsRawCategory = !doc.rawCategory && !!doc.category;
   const needsCategoryUpdate = !!(rawCat) && doc.category !== canonical;
   const needsSubCategory = doc.subCategory !== subCat;
 
   const $set = {};
   if (tagsChanged) $set.tags = normalized;
-  if (needsRawCategory) $set.rawCategory = doc.category;
   if (needsCategoryUpdate) $set.category = canonical;
   if (needsSubCategory) $set.subCategory = subCat;
 

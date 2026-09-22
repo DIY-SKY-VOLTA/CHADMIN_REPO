@@ -140,7 +140,6 @@ const fromDatetimeLocal = (val) => {
 const createEmptyForm = () => ({
   title: '',
   type: 'contest',
-  rawCategory: '',
   category: '',
   subCategory: '',
   link: '',
@@ -229,7 +228,6 @@ const mapDocToForm = (doc) => {
   const f = createEmptyForm();
   f.title = doc.title || '';
   f.type = doc.type === 'hackathon' ? 'hackathon' : 'contest';
-  f.rawCategory = doc.rawCategory || doc.category || '';
   f.category = doc.category || '';
   f.subCategory = doc.subCategory || '';
   f.link = doc.link || '';
@@ -354,7 +352,6 @@ const buildPayload = (form) => {
   const payload = {
     title: str(form.title),
     type: form.type,
-    rawCategory: str(form.rawCategory),
     category: str(form.category),
     subCategory: str(form.subCategory),
     link: str(form.link),
@@ -581,7 +578,7 @@ const ContestForm = () => {
   const handleSave = async () => {
     const missing = [];
     if (!form.title.trim()) missing.push('Title');
-    if (!form.category && !form.rawCategory.trim()) missing.push('Category');
+    if (!form.category) missing.push('Category');
     if (!form.timeline.submissionDeadlineUTC) missing.push('Submission deadline');
     if (missing.length > 0) {
       toast.error(`Missing required fields: ${missing.join(', ')}`);
@@ -751,13 +748,6 @@ const ContestForm = () => {
                     onChange={handleCategoryChange}
                     options={CANONICAL_CATEGORIES}
                     placeholder="Select canonical category"
-                  />
-                </Field>
-                <Field label="Raw Category" hint="Original source wording — used for canonical mapping">
-                  <TextInput
-                    value={form.rawCategory}
-                    onChange={(v) => update('rawCategory', v)}
-                    placeholder="e.g. Digital art & design"
                   />
                 </Field>
                 <Field label="Sub Category">

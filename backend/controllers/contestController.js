@@ -1218,10 +1218,9 @@ function normalizeContestPayload(raw) {
   doc.descriptionDetailed = cleanString(raw.descriptionDetailed);
   doc.link = cleanString(raw.link);
 
-  // Category pipeline — rawCategory preserved, canonical mapped (same as model hook)
-  const rawCategory = cleanString(raw.rawCategory) || cleanString(raw.category);
+  // Category pipeline — canonical mapped (rawCategory field retired from the schema)
+  const rawCategory = cleanString(raw.category);
   if (!rawCategory) throw new Error('Category is required');
-  doc.rawCategory = cleanString(raw.rawCategory) || rawCategory;
   doc.category = mapCanonicalCategory(rawCategory);
   doc.subCategory = cleanString(raw.subCategory) ?? mapSubcategory(rawCategory);
 

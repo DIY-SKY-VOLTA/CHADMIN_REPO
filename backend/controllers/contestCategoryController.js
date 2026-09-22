@@ -11,18 +11,19 @@
 const ContestCategory = require('../models/ContestCategory');
 const Contest = require('../models/Contests');
 
-// Same 10 canonicals as the main backend (tagNormalizer CANONICAL_CATEGORY_LIST).
+// CH Taxonomy v2 (2026-09) — matches Phase2 backend tagNormalizer CANONICAL_CATEGORY_LIST.
+// Seeds only run when the collection is EMPTY; existing rows (with frozen slugs) are untouched.
 const DEFAULT_CATEGORIES = [
-  { name: 'Creative Arts', color: '#ec4899', description: 'Photography, design, illustration, fashion, and visual art contests', sortOrder: 0 },
-  { name: 'Technology & AI', color: '#8b5cf6', description: 'Coding, software, AI/ML, robotics, and technology innovation contests', sortOrder: 1 },
-  { name: 'Science & Research', color: '#06b6d4', description: 'Research, engineering, and scientific discovery contests', sortOrder: 2 },
-  { name: 'Business & Innovation', color: '#f59e0b', description: 'Entrepreneurship, startups, business plans, and innovation challenges', sortOrder: 3 },
-  { name: 'Writing & Media', color: '#f97316', description: 'Writing, journalism, film, video, music, and media contests', sortOrder: 4 },
-  { name: 'Environment & Sustainability', color: '#22c55e', description: 'Climate, sustainability, agriculture, and green innovation contests', sortOrder: 5 },
-  { name: 'Food & Cooking', color: '#ef4444', description: 'Cooking, baking, barbecue, and recipe contests', sortOrder: 6 },
-  { name: 'Education & Learning', color: '#3b82f6', description: 'Education, training, scholarships, and learning-focused contests', sortOrder: 7 },
-  { name: 'Social Impact & Leadership', color: '#14b8a6', description: 'Social entrepreneurship, civic leadership, and community impact', sortOrder: 8 },
-  { name: 'Open / Multidisciplinary', color: '#78716c', description: 'Cross-disciplinary and open-subject contests', sortOrder: 9 },
+  { name: 'Creative Arts & Design', color: '#ec4899', description: 'Visual arts, graphic design, UI/UX, photography, animation, fashion, architecture', sortOrder: 0 },
+  { name: 'AI & Technology', color: '#8b5cf6', description: 'Software, AI, computing, data, cybersecurity, digital technologies', sortOrder: 1 },
+  { name: 'Engineering & Innovation', color: '#94a3b8', description: 'Physical systems, hardware, robotics, aerospace, vehicles, prototypes, deep-tech', sortOrder: 2, isActive: false },
+  { name: 'Science & Research', color: '#06b6d4', description: 'Scientific discovery, experiments, biology, chemistry, physics, medical/scientific research', sortOrder: 3 },
+  { name: 'Business & Entrepreneurship', color: '#f59e0b', description: 'Startups, business strategy, finance, marketing, consulting, product/business challenges', sortOrder: 4 },
+  { name: 'Writing & Media', color: '#f97316', description: 'Writing, journalism, literature, storytelling, filmmaking, podcasting, content and media', sortOrder: 5 },
+  { name: 'Environment & Sustainability', color: '#22c55e', description: 'Climate, conservation, waste, water, renewable energy, agriculture sustainability, biodiversity', sortOrder: 6 },
+  { name: 'Education & Learning', color: '#3b82f6', description: 'Education, teaching, EdTech, academic competitions, Olympiads, skill development', sortOrder: 7 },
+  { name: 'Social Impact & Leadership', color: '#14b8a6', description: 'Community problems, social innovation, leadership, inclusion, civic engagement, governance', sortOrder: 8 },
+  { name: 'Open & Multidisciplinary', color: '#78716c', description: 'Open-subject, cross-domain and unclassifiable-primary-activity contests (honest fallback)', sortOrder: 9 },
 ];
 
 const seedDefaults = async () => {
