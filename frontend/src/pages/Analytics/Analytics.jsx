@@ -344,10 +344,10 @@ export default function AnalyticsPage() {
               color="#f5a53a"
             />
             <KpiCard
-              label="New Writers"
+              label="New Users"
               value={a.users.inRange}
               delta={a.users.delta}
-              deltaTooltip={submitDeltaTooltip(a.users.inRange, a.users.prevRange, 'new writers')}
+              deltaTooltip={submitDeltaTooltip(a.users.inRange, a.users.prevRange, 'new users')}
               sub={`${a.users.total} registered · ${a.users.thisMonth} this month`}
               icon={Users}
               color="#8b5cf6"
@@ -542,7 +542,7 @@ export default function AnalyticsPage() {
                 </div>
                 <div className="flex items-center gap-3 text-[11px] text-neutral-600 dark:text-neutral-300">
                   <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-[#f5a53a]" /> Comments</span>
-                  <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-[#8b5cf6]" /> New writers</span>
+                  <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-[#8b5cf6]" /> New users</span>
                 </div>
               </div>
 
@@ -556,7 +556,7 @@ export default function AnalyticsPage() {
                 </div>
                 <div>
                   <div className="flex items-baseline justify-between mb-1">
-                    <span className="text-[11.5px] font-medium text-neutral-600 dark:text-neutral-300">New writers per day</span>
+                    <span className="text-[11.5px] font-medium text-neutral-600 dark:text-neutral-300">New users per day</span>
                     <span className="text-[11px] text-neutral-500 dark:text-neutral-400 tabular-nums">peak {Math.max(...usersPoints, 0)}</span>
                   </div>
                   <Sparkline points={usersPoints} stroke="#8b5cf6" />

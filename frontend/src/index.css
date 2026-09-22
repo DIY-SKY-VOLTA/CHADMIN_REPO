@@ -103,6 +103,33 @@
   }
 }
 
+/* Interactive cursors — Tailwind v4 dropped `cursor: pointer` from button
+   preflight, so controls render with the default arrow. Restore the expected
+   desktop affordance app-wide; text inputs and disabled states stay default. */
+@layer base {
+  button:not(:disabled),
+  [role="button"]:not(:disabled),
+  [role="option"],
+  [role="tab"],
+  [role="menuitem"],
+  select,
+  summary,
+  label:has(> input[type="checkbox"]),
+  label:has(> input[type="radio"]),
+  input[type="checkbox"],
+  input[type="radio"],
+  input[type="submit"],
+  input[type="button"],
+  a[href] {
+    cursor: pointer;
+  }
+
+  button:disabled,
+  [role="button"]:disabled {
+    cursor: not-allowed;
+  }
+}
+
 .auth-card-shadow {
   box-shadow: 0 0 50px -12px rgba(0, 0, 0, 0.1);
 }

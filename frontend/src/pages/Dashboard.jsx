@@ -132,7 +132,7 @@ const Dashboard = () => {
       icon: Users, 
       color: '#0284c7', 
       bg: 'bg-sky-50 dark:bg-sky-500/10 border-sky-200/40 dark:border-sky-500/20',
-      description: 'Registered writers contributing content',
+      description: 'Registered users on the platform',
       path: '/users',
       delta: stats.deltas?.authors,
       deltaLabel: 'new this week',
@@ -442,7 +442,7 @@ const Dashboard = () => {
                       </div>
                     </div>
 
-                    {/* Manage writers */}
+                    {/* Manage users */}
                     <div 
                       onClick={() => navigate('/users')}
                       className="group p-3.5 bg-neutral-50/40 dark:bg-[#0c0c0e]/10 rounded-xl border border-neutral-200/50 dark:border-white/5 hover:border-neutral-350 dark:hover:border-neutral-850 hover:shadow-[0_1px_3px_rgba(0,0,0,0.01)] transition-all duration-300 cursor-pointer flex items-center gap-3.5"
@@ -452,7 +452,7 @@ const Dashboard = () => {
                       </div>
                       <div>
                         <h4 className="text-xs font-bold text-neutral-855 dark:text-neutral-200 group-hover:text-neutral-950 dark:group-hover:text-white transition-colors">
-                          Writers Registry
+                          User Registry
                         </h4>
                         <p className="text-[9px] text-neutral-450 dark:text-neutral-500 mt-0.5">
                           View details and manage staff rights

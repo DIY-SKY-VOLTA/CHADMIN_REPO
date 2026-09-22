@@ -79,7 +79,7 @@ const sections = [
         heading: 'People & Content',
         items: [
           { icon: Tag, label: 'Post Categories', path: '/categories' },
-          { icon: Users, label: 'Writers & Admins', path: '/users' },
+          { icon: Users, label: 'User Management', path: '/users' },
           { icon: ImageIcon, label: 'Media Library', path: '/images' },
           { icon: MessageSquare, label: 'Comments', path: '/comments' },
         ],

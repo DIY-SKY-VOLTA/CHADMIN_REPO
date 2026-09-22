@@ -32,9 +32,9 @@ import adminAPI from '@/api/adminAPI';
 import ConfirmDialog from '@/components/UI/ConfirmDialog';
 
 const tierConfig = {
-  new:      { label: 'New Writer',      color: 'text-neutral-500 dark:text-neutral-400 bg-neutral-100 dark:bg-white/5 border-neutral-250 dark:border-white/5', hint: 'Every post goes to the review queue' },
-  verified: { label: 'Verified Writer', color: 'text-blue-600 dark:text-blue-400 bg-blue-500/10 border-blue-500/10', hint: 'Auto-publishes · 25% spot-checked' },
-  trusted:  { label: 'Trusted Writer',  color: 'text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border-emerald-500/10', hint: 'Auto-publishes, no spot-checks' },
+  new:      { label: 'New',      color: 'text-neutral-500 dark:text-neutral-400 bg-neutral-100 dark:bg-white/5 border-neutral-250 dark:border-white/5', hint: 'Every post goes to the review queue' },
+  verified: { label: 'Verified', color: 'text-blue-600 dark:text-blue-400 bg-blue-500/10 border-blue-500/10', hint: 'Auto-publishes · 25% spot-checked' },
+  trusted:  { label: 'Trusted',  color: 'text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border-emerald-500/10', hint: 'Auto-publishes, no spot-checks' },
 };
 
 // Tier behavior explainer shown under the tier pill
@@ -42,7 +42,7 @@ const TierPill = ({ tier }) => {
   const cfg = tierConfig[tier] || tierConfig.new;
   return (
     <span
-      className={`px-2 py-0.5 rounded text-[8px] font-bold border cursor-help ${cfg.color}`}
+      className={`px-2 py-0.5 rounded text-[9px] font-bold border cursor-help ${cfg.color}`}
       title={cfg.hint}
     >
       {cfg.label}
@@ -60,7 +60,7 @@ export default function UsersPage() {
   const [isActionLoading, setIsActionLoading] = useState(false);
 
   // Redesign states
-  const [roleFilter, setRoleFilter] = useState('all'); // 'all' | 'admins' | 'verified' | 'writers' | 'banned' | 'deleted'
+  const [roleFilter, setRoleFilter] = useState('all'); // 'all' | 'admins' | 'verified' | 'contributors' (API: writers) | 'banned' | 'deleted'
   // Pending confirmation — renders ConfirmDialog instead of native prompt/confirm
   const [dialog, setDialog] = useState(null);
   const [sortBy, setSortBy] = useState('newest'); // 'newest' | 'oldest' | 'alphabetical'
@@ -122,7 +122,7 @@ export default function UsersPage() {
         }
       }
     } catch {
-      toast.error('Failed to set writer tier');
+      toast.error('Failed to set tier');
     } finally {
       setIsActionLoading(false);
     }
@@ -468,11 +468,11 @@ export default function UsersPage() {
       {/* Header */}
       <div className="shrink-0 flex items-center justify-between px-6 py-4 border-b border-neutral-200/50 dark:border-white/5 bg-white/40 dark:bg-[#121214]/40 backdrop-blur-sm">
         <div>
-          <h1 className="text-base font-semibold text-neutral-900 dark:text-neutral-100 flex items-center gap-2">
-            Writers & Admins
+          <h1 className="text-xl font-semibold tracking-tight text-neutral-900 dark:text-neutral-100">
+            User Management
           </h1>
-          <p className="text-[11px] text-neutral-400 dark:text-neutral-500 mt-0.5">
-            {pagination ? `Showing ${users.length} of ${pagination.total} registered users` : 'Manage platform users, roles, and writers'}
+          <p className="text-xs text-neutral-400 dark:text-neutral-500 mt-0.5">
+            {pagination ? `Showing ${users.length} of ${pagination.total} registered users` : 'Manage members, roles, verification, and access'}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -487,9 +487,9 @@ export default function UsersPage() {
                 toast.success('Users exported');
               } catch { toast.error('Export failed'); }
             }}
-            className="p-1.5 rounded-lg border border-neutral-200/50 dark:border-white/5 bg-white dark:bg-[#18181b] hover:bg-neutral-50 dark:hover:bg-white/5 text-neutral-500 hover:text-neutral-900 dark:hover:text-white transition-all shadow-sm flex items-center gap-1.5 text-[11px] font-medium"
+            className="p-2 rounded-lg border border-neutral-200/50 dark:border-white/5 bg-white dark:bg-[#18181b] hover:bg-neutral-50 dark:hover:bg-white/5 text-neutral-600 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-white transition-all shadow-sm flex items-center gap-1.5 text-xs font-medium"
           >
-            <Download size={12} />
+            <Download size={13} />
             Export CSV
           </button>
           <button
@@ -498,9 +498,9 @@ export default function UsersPage() {
               fetchUsers();
               toast.success('User database reloaded');
             }}
-            className="p-1.5 rounded-lg border border-neutral-200/50 dark:border-white/5 bg-white dark:bg-[#18181b] hover:bg-neutral-50 dark:hover:bg-white/5 text-neutral-500 hover:text-neutral-900 dark:hover:text-white transition-all shadow-sm flex items-center gap-1.5 text-[11px] font-medium"
+            className="p-2 rounded-lg border border-neutral-200/50 dark:border-white/5 bg-white dark:bg-[#18181b] hover:bg-neutral-50 dark:hover:bg-white/5 text-neutral-600 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-white transition-all shadow-sm flex items-center gap-1.5 text-xs font-medium"
           >
-            <RefreshCw size={12} className={isLoading ? 'animate-spin' : ''} />
+            <RefreshCw size={13} className={isLoading ? 'animate-spin' : ''} />
             Reload
           </button>
         </div>
@@ -511,44 +511,44 @@ export default function UsersPage() {
         {/* Total Registered */}
         <div className="bg-white dark:bg-[#151518]/70 border border-neutral-200/40 dark:border-white/5 p-4 rounded-xl shadow-[0_1px_3px_rgba(0,0,0,0.02)] flex items-center justify-between group hover:border-neutral-300 dark:hover:border-neutral-800 transition-all">
           <div className="space-y-1">
-            <span className="text-[10px] font-semibold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider">Total Members</span>
-            <p className="text-xl font-bold text-neutral-800 dark:text-neutral-100 leading-none">{pagination ? pagination.total : users.length}</p>
+            <span className="text-[11px] font-semibold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider">Total Users</span>
+            <p className="text-2xl font-semibold tracking-tight text-neutral-900 dark:text-neutral-100 leading-none">{pagination ? pagination.total : users.length}</p>
           </div>
-          <div className="w-8 h-8 rounded-lg bg-neutral-100 dark:bg-neutral-800/50 flex items-center justify-center text-neutral-550">
-            <Users size={15} strokeWidth={1.5} />
+          <div className="w-9 h-9 rounded-lg bg-neutral-100 dark:bg-neutral-800/50 flex items-center justify-center text-neutral-550">
+            <Users size={16} strokeWidth={1.5} />
           </div>
         </div>
 
         {/* Admins Count */}
         <div className="bg-white dark:bg-[#151518]/70 border border-neutral-200/40 dark:border-white/5 p-4 rounded-xl shadow-[0_1px_3px_rgba(0,0,0,0.02)] flex items-center justify-between group hover:border-neutral-300 dark:hover:border-neutral-800 transition-all">
           <div className="space-y-1">
-            <span className="text-[10px] font-semibold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider">Admin Staff</span>
-            <p className="text-xl font-bold text-neutral-800 dark:text-neutral-100 leading-none">{adminCount}</p>
+            <span className="text-[11px] font-semibold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider">Admins</span>
+            <p className="text-2xl font-semibold tracking-tight text-neutral-900 dark:text-neutral-100 leading-none">{adminCount}</p>
           </div>
-          <div className="w-8 h-8 rounded-lg bg-blue-500/10 flex items-center justify-center text-blue-600 dark:text-blue-500">
-            <Shield size={15} strokeWidth={1.5} />
+          <div className="w-9 h-9 rounded-lg bg-blue-500/10 flex items-center justify-center text-blue-600 dark:text-blue-500">
+            <Shield size={16} strokeWidth={1.5} />
           </div>
         </div>
 
         {/* Verified Count */}
         <div className="bg-white dark:bg-[#151518]/70 border border-neutral-200/40 dark:border-white/5 p-4 rounded-xl shadow-[0_1px_3px_rgba(0,0,0,0.02)] flex items-center justify-between group hover:border-neutral-300 dark:hover:border-neutral-800 transition-all">
           <div className="space-y-1">
-            <span className="text-[10px] font-semibold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider">Verified Writers</span>
-            <p className="text-xl font-bold text-neutral-800 dark:text-neutral-100 leading-none">{verifiedCount}</p>
+            <span className="text-[11px] font-semibold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider">Verified Accounts</span>
+            <p className="text-2xl font-semibold tracking-tight text-neutral-900 dark:text-neutral-100 leading-none">{verifiedCount}</p>
           </div>
-          <div className="w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center text-emerald-600 dark:text-emerald-500">
-            <BadgeCheck size={15} strokeWidth={1.5} />
+          <div className="w-9 h-9 rounded-lg bg-emerald-500/10 flex items-center justify-center text-emerald-600 dark:text-emerald-500">
+            <BadgeCheck size={16} strokeWidth={1.5} />
           </div>
         </div>
 
         {/* Trusted Count */}
         <div className="bg-white dark:bg-[#151518]/70 border border-neutral-200/40 dark:border-white/5 p-4 rounded-xl shadow-[0_1px_3px_rgba(0,0,0,0.02)] flex items-center justify-between group hover:border-neutral-300 dark:hover:border-neutral-800 transition-all">
           <div className="space-y-1">
-            <span className="text-[10px] font-semibold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider">Trusted Tier</span>
-            <p className="text-xl font-bold text-neutral-800 dark:text-neutral-100 leading-none">{trustedCount}</p>
+            <span className="text-[11px] font-semibold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider">Trusted Tier</span>
+            <p className="text-2xl font-semibold tracking-tight text-neutral-900 dark:text-neutral-100 leading-none">{trustedCount}</p>
           </div>
-          <div className="w-8 h-8 rounded-lg bg-amber-500/10 flex items-center justify-center text-amber-600 dark:text-amber-500">
-            <Star size={15} strokeWidth={1.5} />
+          <div className="w-9 h-9 rounded-lg bg-amber-500/10 flex items-center justify-center text-amber-600 dark:text-amber-500">
+            <Star size={16} strokeWidth={1.5} />
           </div>
         </div>
       </div>
@@ -558,13 +558,13 @@ export default function UsersPage() {
         {/* Search Input */}
         <form onSubmit={handleSearch} className="w-full md:w-80 flex gap-2">
           <div className="relative flex-1">
-            <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400 dark:text-neutral-550" />
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400 dark:text-neutral-550" />
             <input
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search by username or email..."
-              className="w-full pl-9 pr-8 py-1.5 bg-white dark:bg-[#151518] border border-neutral-200/60 dark:border-white/5 rounded-lg text-xs text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 focus:outline-none focus:border-neutral-400 dark:focus:border-neutral-700 transition-all shadow-[0_1px_2px_rgba(0,0,0,0.01)]"
+              placeholder="Search by username or email…"
+              className="w-full pl-9 pr-8 py-2 bg-white dark:bg-[#151518] border border-neutral-200/60 dark:border-white/5 rounded-lg text-[13px] text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 focus:outline-none focus:border-neutral-400 dark:focus:border-neutral-700 focus:ring-2 focus:ring-neutral-900/5 dark:focus:ring-white/5 transition-all shadow-[0_1px_2px_rgba(0,0,0,0.01)]"
             />
             {search && (
               <button
@@ -578,7 +578,7 @@ export default function UsersPage() {
           </div>
           <button
             type="submit"
-            className="px-3 py-1.5 bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 rounded-lg text-xs font-semibold hover:opacity-90 transition-all shadow-sm"
+            className="px-3.5 py-2 bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 rounded-lg text-xs font-semibold hover:opacity-90 active:scale-[0.98] transition-all shadow-sm"
           >
             Search
           </button>
@@ -590,7 +590,7 @@ export default function UsersPage() {
           <div className="p-0.5 rounded-lg bg-neutral-200/50 dark:bg-neutral-950/60 border border-neutral-200/40 dark:border-white/5 flex gap-0.5 shadow-inner">
             <button
               onClick={() => setRoleFilter('all')}
-              className={`px-3 py-1 text-[11px] font-medium rounded-md transition-all ${
+              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all ${
                 roleFilter === 'all'
                   ? 'bg-white dark:bg-[#1b1b1e] text-neutral-900 dark:text-white shadow-sm'
                   : 'text-neutral-500 dark:text-neutral-400 hover:text-neutral-750 dark:hover:text-neutral-350'
@@ -600,7 +600,7 @@ export default function UsersPage() {
             </button>
             <button
               onClick={() => setRoleFilter('admins')}
-              className={`px-3 py-1 text-[11px] font-medium rounded-md transition-all ${
+              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all ${
                 roleFilter === 'admins'
                   ? 'bg-white dark:bg-[#1b1b1e] text-neutral-900 dark:text-white shadow-sm'
                   : 'text-neutral-500 dark:text-neutral-400 hover:text-neutral-750 dark:hover:text-neutral-350'
@@ -610,7 +610,7 @@ export default function UsersPage() {
             </button>
             <button
               onClick={() => setRoleFilter('verified')}
-              className={`px-3 py-1 text-[11px] font-medium rounded-md transition-all ${
+              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all ${
                 roleFilter === 'verified'
                   ? 'bg-white dark:bg-[#1b1b1e] text-neutral-900 dark:text-white shadow-sm'
                   : 'text-neutral-500 dark:text-neutral-400 hover:text-neutral-750 dark:hover:text-neutral-350'
@@ -620,17 +620,17 @@ export default function UsersPage() {
             </button>
             <button
               onClick={() => setRoleFilter('writers')}
-              className={`px-3 py-1 text-[11px] font-medium rounded-md transition-all ${
+              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all ${
                 roleFilter === 'writers'
                   ? 'bg-white dark:bg-[#1b1b1e] text-neutral-900 dark:text-white shadow-sm'
                   : 'text-neutral-500 dark:text-neutral-400 hover:text-neutral-750 dark:hover:text-neutral-350'
               }`}
             >
-              Writers
+              Contributors
             </button>
             <button
               onClick={() => setRoleFilter('banned')}
-              className={`px-3 py-1 text-[11px] font-medium rounded-md transition-all ${
+              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all ${
                 roleFilter === 'banned'
                   ? 'bg-white dark:bg-[#1b1b1e] text-neutral-900 dark:text-white shadow-sm'
                   : 'text-neutral-500 dark:text-neutral-400 hover:text-neutral-750 dark:hover:text-neutral-350'
@@ -640,17 +640,17 @@ export default function UsersPage() {
             </button>
             <button
               onClick={() => setRoleFilter('pending_deletion')}
-              className={`px-3 py-1 text-[11px] font-medium rounded-md transition-all ${
+              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all ${
                 roleFilter === 'pending_deletion'
                   ? 'bg-white dark:bg-[#1b1b1e] text-neutral-900 dark:text-white shadow-sm'
                   : 'text-neutral-500 dark:text-neutral-400 hover:text-neutral-750 dark:hover:text-neutral-350'
               }`}
             >
-              Pending deletion
+              Pending Deletion
             </button>
             <button
               onClick={() => setRoleFilter('deleted')}
-              className={`px-3 py-1 text-[11px] font-medium rounded-md transition-all ${
+              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all ${
                 roleFilter === 'deleted'
                   ? 'bg-white dark:bg-[#1b1b1e] text-neutral-900 dark:text-white shadow-sm'
                   : 'text-neutral-500 dark:text-neutral-400 hover:text-neutral-750 dark:hover:text-neutral-350'
@@ -665,10 +665,10 @@ export default function UsersPage() {
             <select
               value={sortBy}
               onChange={(e) => setSortBy(e.target.value)}
-              className="bg-transparent text-[11px] font-medium text-neutral-600 dark:text-neutral-350 focus:outline-none border-none pr-1 py-0.5 cursor-pointer"
+              className="bg-transparent text-xs font-medium text-neutral-600 dark:text-neutral-350 focus:outline-none border-none pr-1 py-0.5 cursor-pointer"
             >
-              <option value="newest" className="dark:bg-[#151518]">Newest Joint</option>
-              <option value="oldest" className="dark:bg-[#151518]">Oldest Joint</option>
+              <option value="newest" className="dark:bg-[#151518]">Newest joined</option>
+              <option value="oldest" className="dark:bg-[#151518]">Oldest joined</option>
               <option value="alphabetical" className="dark:bg-[#151518]">Username A-Z</option>
             </select>
           </div>
@@ -758,14 +758,14 @@ export default function UsersPage() {
           </div>
         ) : users.length === 0 ? (
           <div className="bg-white dark:bg-[#151518]/40 border border-neutral-200/40 dark:border-white/5 rounded-2xl flex flex-col items-center justify-center py-20 shadow-sm">
-            <Users size={28} strokeWidth={1.5} className="text-neutral-350 dark:text-neutral-600 mb-3" />
-            <p className="text-xs font-semibold text-neutral-800 dark:text-neutral-300">
+            <Users size={32} strokeWidth={1.5} className="text-neutral-350 dark:text-neutral-600 mb-3" />
+            <p className="text-sm font-semibold text-neutral-800 dark:text-neutral-300">
               {isDeletedView ? 'No deleted accounts' : 'No users found'}
             </p>
-            <p className="text-[11px] text-neutral-400 mt-1">
+            <p className="text-xs text-neutral-400 mt-1">
               {isDeletedView
                 ? 'Soft-deleted accounts appear here — restore them or erase them from the database permanently.'
-                : 'Try adapting your filters or searching another parameter.'}
+                : 'Try adjusting your filters or searching for something else.'}
             </p>
           </div>
         ) : (
@@ -773,7 +773,7 @@ export default function UsersPage() {
           <div className="bg-white dark:bg-[#151518]/70 border border-neutral-200/40 dark:border-white/5 rounded-xl overflow-hidden shadow-[0_1px_2px_rgba(0,0,0,0.01)]">
             <div className="min-w-full divide-y divide-neutral-200/50 dark:divide-white/5">
               {/* Header column names */}
-              <div className="bg-neutral-50/50 dark:bg-neutral-900/30 px-5 py-2 flex items-center text-[10px] font-semibold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider">
+              <div className="bg-neutral-50/50 dark:bg-neutral-900/30 px-5 py-2.5 flex items-center text-[11px] font-semibold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider">
                 <div className="w-[28px] shrink-0">
                   <input
                     type="checkbox"
@@ -802,7 +802,7 @@ export default function UsersPage() {
                   <div
                     key={user._id}
                     onClick={() => { if (!isDeletedView) openUserDetail(user); }}
-                    className={`px-5 py-3 flex items-center hover:bg-neutral-50 dark:hover:bg-white/5 transition-colors text-xs text-neutral-700 dark:text-neutral-350 ${
+                    className={`px-5 py-3.5 flex items-center hover:bg-neutral-50 dark:hover:bg-white/5 transition-colors text-[13px] text-neutral-700 dark:text-neutral-350 ${
                       isDeletedView ? '' : 'cursor-pointer'
                     } ${
                       selectedUser?._id === user._id ? 'bg-neutral-100/60 dark:bg-white/5 font-medium' : ''
@@ -829,12 +829,12 @@ export default function UsersPage() {
                         />
                       </div>
                       <div className="truncate min-w-0">
-                        <span className="truncate font-semibold text-neutral-900 dark:text-white leading-snug">
+                        <span className="truncate font-semibold text-[13px] text-neutral-900 dark:text-white leading-snug">
                           {user.username}
                         </span>
                         {/* Render writer stats tier pill locally if available */}
                         {user.writerStats && (
-                          <span className={`ml-2 inline-flex px-1.5 py-0.5 rounded text-[8px] font-bold border ${tierConfig[user.writerStats.tier]?.color || 'text-neutral-400 bg-neutral-150'}`}>
+                          <span className={`ml-2 inline-flex px-1.5 py-0.5 rounded text-[9px] font-bold border ${tierConfig[user.writerStats.tier]?.color || 'text-neutral-400 bg-neutral-150'}`}>
                             {tierConfig[user.writerStats.tier]?.label || 'New'}
                           </span>
                         )}
@@ -842,7 +842,7 @@ export default function UsersPage() {
                     </div>
 
                     {/* Email */}
-                    <div className="w-[27%] truncate pr-2 text-neutral-500 dark:text-neutral-400">
+                    <div className="w-[27%] truncate pr-2 text-[12.5px] text-neutral-500 dark:text-neutral-400">
                       {user.email}
                     </div>
 
@@ -1012,7 +1012,7 @@ export default function UsersPage() {
                   <div className="space-y-2">
                     <div className="flex items-center gap-1.5 text-neutral-400 uppercase tracking-wider text-[9px] font-semibold">
                       <Star size={11} className="text-amber-500" />
-                      <span>Writer Status & Statistics</span>
+                      <span>Contribution Stats</span>
                     </div>
                     <div className="bg-neutral-50/50 dark:bg-[#1b1b1e]/30 border border-neutral-200/30 dark:border-white/5 rounded-xl p-3 space-y-3">
                       <div className="flex justify-between items-center">
@@ -1067,7 +1067,7 @@ export default function UsersPage() {
                               disabled={isActionLoading}
                               onClick={() => handleSetTier(selectedUser._id, '', true)}
                               className="px-2 py-1 rounded-md text-[9px] font-semibold border bg-white dark:bg-[#151518] text-red-500 hover:text-red-600 dark:hover:text-red-400 border-neutral-200/60 dark:border-white/10 hover:border-red-400 transition-all disabled:opacity-40"
-                              title="Clear the rejection demotion — writer returns to the automatic tier"
+                              title="Clear the rejection demotion — tier returns to the automatic calculation"
                             >
                               Clear Demotion
                             </button>
@@ -1256,7 +1256,7 @@ export default function UsersPage() {
               {/* Administrative actions in footer drawer */}
               <div className="shrink-0 p-4 border-t border-neutral-200/50 dark:border-white/5 bg-neutral-50/50 dark:bg-neutral-900/30 space-y-2.5">
                 <span className="block text-[9px] font-semibold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider">
-                  Admin Control panel
+                  Admin Control Panel
                 </span>
                 <div className="grid grid-cols-2 gap-3">
                   <button
