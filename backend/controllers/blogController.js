@@ -163,10 +163,36 @@ exports.getDashboardStats = async (req, res) => {
   }
 };
 
+// Author-voice fields admins may NOT change — the post is published under
+// the writer's byline, so substantive content is the writer's to revise via
+// reject-with-feedback → resubmit. Platform packaging (slug, category, tags,
+// SEO meta, read time, cover alt/caption) stays editable for repairs.
+const AUTHOR_VOICE_FIELDS = ['title', 'content', 'excerpt'];
+
+// Strip voice fields from an update payload (mutates) and return the ones
+// that were present so callers can warn.
+function stripAuthorVoiceFields(updateData) {
+  return AUTHOR_VOICE_FIELDS.filter((f) => {
+    if (!(f in updateData)) return false;
+    delete updateData[f];
+    return true;
+  });
+}
+
 exports.saveEdits = async (req, res) => {
   try {
     const { id } = req.params;
     const updateData = req.body;
+
+    // Policy: admins review and curate, they don't rewrite the author.
+    const blocked = stripAuthorVoiceFields(updateData);
+    if (blocked.length) {
+      return res.status(403).json({
+        success: false,
+        message: `Content is author-owned and cannot be edited by admins (${blocked.join(', ')}). Reject with feedback so the writer can revise.`,
+        blockedFields: blocked,
+      });
+    }
 
     const blog = await BlogSubmission.findByIdAndUpdate(id, {
       ...updateData,
@@ -187,8 +213,28 @@ exports.approveBlog = async (req, res) => {
     const { id } = req.params;
     const { feedback, ...contentUpdates } = req.body;
 
+    // Policy: approval publishes the author's words under their byline —
+    // content edits are refused here. Reject with feedback instead.
+    const blocked = stripAuthorVoiceFields(contentUpdates);
+    if (blocked.length) {
+      return res.status(403).json({
+        success: false,
+        message: `Content is author-owned and cannot be changed during approval (${blocked.join(', ')}). Reject with feedback so the writer can revise.`,
+        blockedFields: blocked,
+      });
+    }
+
     const blog = await BlogSubmission.findById(id);
     if (!blog) return res.status(404).json({ success: false, message: 'Blog not found' });
+
+    // Editorial transparency — metadata the admin adjusts during approval is
+    // stamped on the record so curation changes are visible. Author-voice
+    // fields were already refused above; these are platform-packaging only.
+    const METADATA_FIELDS = ['slug', 'category', 'tags', 'coverImage', 'coverImageAlt', 'coverImageCaption', 'metaTitle', 'metaDescription', 'readTime'];
+    const changedFields = METADATA_FIELDS.filter(f =>
+      f in contentUpdates && String(contentUpdates[f] ?? '') !== String(blog[f] ?? '')
+    );
+    const adminEdited = changedFields.length > 0;
 
     // Update content and status
     Object.assign(blog, contentUpdates);
@@ -197,6 +243,15 @@ exports.approveBlog = async (req, res) => {
       adminId: req.admin.id,
       feedback: feedback || 'Approved',
       verifiedAt: new Date()
+    };
+    blog.adminEdits = {
+      edited: adminEdited,
+      summary: adminEdited
+        ? `Editorial adjustments to: ${changedFields.join(', ')}`
+        : '',
+      editedFields: changedFields,
+      adminName: req.admin.username || 'Admin',
+      editedAt: adminEdited ? new Date() : null,
     };
 
     // Publish to Sanity CMS
@@ -220,7 +275,12 @@ exports.approveBlog = async (req, res) => {
       targetType: 'blog',
     });
 
-    res.json({ success: true, message: 'Blog approved and published' });
+    res.json({
+      success: true,
+      message: 'Blog approved and published',
+      adminEdited,
+      editedFields: changedFields,
+    });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }

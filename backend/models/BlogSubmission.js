@@ -75,6 +75,27 @@ const blogSubmissionSchema = new mongoose.Schema({
     feedback: String,
     verifiedAt: Date,
   },
+  // Editorial transparency: stamped when an admin changed author content
+  // (title/body/meta) during review so the writer can be told their post
+  // was published with adjustments instead of silently rewritten.
+  adminEdits: {
+    edited: {
+      type: Boolean,
+      default: false,
+      description: "True when admin modified author-submitted content",
+    },
+    summary: {
+      type: String,
+      default: "",
+      description: "Human-readable description of what was changed",
+    },
+    editedFields: [{
+      type: String,
+      description: "Field paths the admin touched, e.g. title, content, category",
+    }],
+    adminName: String,
+    editedAt: Date,
+  },
   sanityId: {
     type: String,
     default: null,

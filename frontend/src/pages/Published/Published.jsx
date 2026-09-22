@@ -25,11 +25,13 @@ import {
   Settings,
   Layers,
   ChevronRight as ChevronRightIcon,
-  Download
+  Download,
+  Trash2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'react-hot-toast';
 import adminAPI from '@/api/adminAPI';
+import ConfirmDialog from '@/components/UI/ConfirmDialog';
 
 export default function PublishedPage() {
   const [submissions, setSubmissions] = useState([]);
@@ -40,6 +42,9 @@ export default function PublishedPage() {
   const [page, setPage] = useState(1);
   const [unpublishTarget, setUnpublishTarget] = useState(null);
   const [isProcessing, setIsProcessing] = useState(false);
+  // Pending hard delete — the ConfirmDialog's typed-confirmation target
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // Redesign local states
   const [viewMode, setViewMode] = useState(() => localStorage.getItem('published_view_mode') || 'grid');
@@ -119,6 +124,30 @@ export default function PublishedPage() {
       toast.error('Failed to unpublish');
     } finally {
       setIsProcessing(false);
+    }
+  };
+
+  // HARD delete a published post — removes the MongoDB record AND the live
+  // Sanity copy (the endpoint handles both). For erasing test posts; real
+  // users' content should be unpublish-ed (reversible) instead.
+  const handleDeleteConfirmed = async () => {
+    if (!deleteTarget) return;
+    setIsDeleting(true);
+    try {
+      const res = await adminAPI.delete(`/blogs/submissions/${deleteTarget._id}`);
+      if (res.success) {
+        toast.success(res.message || `"${deleteTarget.title}" permanently deleted`);
+        setSubmissions(prev => prev.filter(s => s._id !== deleteTarget._id));
+        if (selectedBlog?._id === deleteTarget._id) setSelectedBlog(null);
+        setDeleteTarget(null);
+        fetchStats();
+      } else {
+        toast.error(res.message || 'Delete failed');
+      }
+    } catch (err) {
+      toast.error(err?.message || 'Delete failed');
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -771,17 +800,22 @@ export default function PublishedPage() {
                     </div>
                   </div>
                 ) : (
-                  /* Edit Mode */
+                  /* Edit Mode — platform packaging only. Title/excerpt are the
+                     author's voice and render read-only; content fixes go
+                     through unpublish → writer revision, not silent rewrites. */
                   <form onSubmit={handleEditSubmit} className="space-y-4 text-xs">
-                    {/* Title */}
+                    {/* Title — read-only (author voice) */}
                     <div className="space-y-1">
-                      <label className="text-[10px] font-semibold text-neutral-400 uppercase tracking-wider">Blog Title</label>
+                      <div className="flex items-center justify-between">
+                        <label className="text-[10px] font-semibold text-neutral-400 uppercase tracking-wider">Blog Title</label>
+                        <span className="text-[8px] font-bold text-neutral-400 uppercase tracking-wider">Author's — locked</span>
+                      </div>
                       <input
                         type="text"
-                        required
+                        readOnly
                         value={editForm.title}
-                        onChange={(e) => setEditForm(prev => ({ ...prev, title: e.target.value }))}
-                        className="w-full px-3 py-2 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-white/5 rounded-lg text-neutral-900 dark:text-white placeholder-neutral-400 focus:outline-none focus:border-neutral-400 dark:focus:border-neutral-700 transition-colors"
+                        className="w-full px-3 py-2 bg-neutral-100/70 dark:bg-neutral-900/60 border border-neutral-200 dark:border-white/5 rounded-lg text-neutral-500 dark:text-neutral-400 cursor-not-allowed select-all"
+                        title="Author-owned content — admins cannot retitle published posts"
                       />
                     </div>
 
@@ -836,15 +870,15 @@ export default function PublishedPage() {
                       </div>
                     </div>
 
-                    {/* Excerpt text */}
+                    {/* Excerpt — read-only (author voice) */}
                     <div className="space-y-1">
-                      <label className="text-[10px] font-semibold text-neutral-400 uppercase tracking-wider">Excerpt Description</label>
-                      <textarea
-                        rows={2}
-                        value={editForm.excerpt}
-                        onChange={(e) => setEditForm(prev => ({ ...prev, excerpt: e.target.value }))}
-                        className="w-full px-3 py-2 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-white/5 rounded-lg text-neutral-900 dark:text-white placeholder-neutral-400 focus:outline-none focus:border-neutral-400 dark:focus:border-neutral-700 transition-colors resize-none leading-relaxed"
-                      />
+                      <div className="flex items-center justify-between">
+                        <label className="text-[10px] font-semibold text-neutral-400 uppercase tracking-wider">Excerpt Description</label>
+                        <span className="text-[8px] font-bold text-neutral-400 uppercase tracking-wider">Author's — locked</span>
+                      </div>
+                      <p className="w-full px-3 py-2 bg-neutral-100/70 dark:bg-neutral-900/60 border border-neutral-200 dark:border-white/5 rounded-lg text-[11px] text-neutral-500 dark:text-neutral-400 leading-relaxed">
+                        {editForm.excerpt || <span className="italic">No excerpt</span>}
+                      </p>
                     </div>
 
                     {/* SEO section */}
@@ -894,8 +928,8 @@ export default function PublishedPage() {
                 )}
               </div>
 
-              {/* Drawer footer (Delete / Unpublish button) */}
-              <div className="shrink-0 p-4 border-t border-neutral-200/50 dark:border-white/5 bg-neutral-50/50 dark:bg-neutral-900/30">
+              {/* Drawer footer (Unpublish / Delete Forever) */}
+              <div className="shrink-0 p-4 border-t border-neutral-200/50 dark:border-white/5 bg-neutral-50/50 dark:bg-neutral-900/30 space-y-2">
                 {selectedBlog.sanityId ? (
                   <button
                     onClick={() => {
@@ -911,6 +945,14 @@ export default function PublishedPage() {
                     This post is not currently associated with an active Sanity server document.
                   </div>
                 )}
+                {/* Hard delete — quiet destructive action for erasing test posts */}
+                <button
+                  onClick={() => setDeleteTarget(selectedBlog)}
+                  className="w-full flex items-center justify-center gap-2 py-2 text-[11px] font-semibold text-neutral-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-500/5 border border-transparent hover:border-red-500/20 rounded-xl transition-all duration-200"
+                >
+                  <Trash2 size={12} />
+                  Delete Forever
+                </button>
               </div>
             </motion.div>
           </>
@@ -959,6 +1001,23 @@ export default function PublishedPage() {
           </div>
         )}
       </AnimatePresence>
+
+      {/* Hard delete confirmation — typed DELETE required */}
+      <ConfirmDialog
+        open={!!deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={handleDeleteConfirmed}
+        title={`Permanently delete "${deleteTarget?.title || ''}"?`}
+        intent="danger"
+        actionIcon="delete"
+        confirmLabel="Delete forever"
+        requireText="DELETE"
+        busy={isDeleting}
+      >
+        This erases the blog from MongoDB <strong>and</strong> removes its live
+        copy from Sanity. The public site will 404 immediately. This cannot be
+        undone — only do this for test posts; for real content prefer Unpublish.
+      </ConfirmDialog>
     </div>
   );
 }

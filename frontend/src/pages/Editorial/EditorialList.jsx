@@ -13,7 +13,7 @@ import {
   Loader2,
   Users,
   Inbox,
-  X
+  PenLine
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
@@ -366,6 +366,17 @@ const EditorialList = () => {
                                 Possible Duplicate
                               </span>
                             )}
+
+                            {/* Editorial transparency — content was adjusted during approval */}
+                            {item.adminEdits?.edited && (
+                              <span
+                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-purple-500/10 border border-purple-500/20 text-[9px] font-bold text-purple-600 dark:text-purple-400 uppercase tracking-wider"
+                                title={`${item.adminEdits.summary || 'Content adjusted'} — by ${item.adminEdits.adminName || 'admin'}${item.adminEdits.editedAt ? `, ${new Date(item.adminEdits.editedAt).toLocaleDateString()}` : ''}`}
+                              >
+                                <PenLine size={9} />
+                                Edited by Admin
+                              </span>
+                            )}
                           </div>
                           <p className="text-[11.5px] text-neutral-400 dark:text-neutral-500 mt-0.5">
                             by <span className="font-semibold text-neutral-500 dark:text-neutral-400">{item.author?.name || 'Unknown author'}</span>
@@ -412,7 +423,7 @@ const EditorialList = () => {
                                   onClick={(e) => { e.stopPropagation(); navigate(`/editorial/${item._id}`); }}
                                   className="px-3.5 py-2 text-xs font-semibold bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 hover:bg-neutral-800 dark:hover:bg-neutral-50 active:scale-[0.98] rounded-lg transition-all shadow-sm"
                                 >
-                                  Review & Edit
+                                  Review
                                 </button>
 
                                 {activeTab === 'pending' && (

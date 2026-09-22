@@ -17,6 +17,11 @@ import BlockEditor from '../../components/Editor/BlockEditor';
 import './writeBlogEditor.css';
 import './blogdetails.css';
 
+// Policy: admins review & curate, never rewrite author content.
+// Title/body/excerpt are the writer's voice — they go read-only everywhere;
+// platform packaging (slug, category, tags, SEO, read time) stays editable.
+const ADMIN_READ_ONLY = true;
+
 const formatSavedTime = (value) => {
   if (!value) return 'Not saved yet';
   const date = value instanceof Date ? value : new Date(value);
@@ -67,7 +72,10 @@ const EditorialDetail = () => {
   const [showRejectionPanel, setShowRejectionPanel] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
   const [showSidebar, setShowSidebar] = useState(() => window.innerWidth >= 1024);
-  const [isPreviewMode, setIsPreviewMode] = useState(false);
+  // Read-only review surface: the body starts in preview mode and cannot be
+  // edited. Only the metadata sidebar (slug, category, tags, SEO, read time)
+  // accepts changes — author-voice fields are locked by policy.
+  const [isPreviewMode, setIsPreviewMode] = useState(ADMIN_READ_ONLY);
   const [lastSaved, setLastSaved] = useState(null);
   const [categories, setCategories] = useState([]);
   const editorRef = useRef(null);
@@ -147,7 +155,12 @@ const EditorialDetail = () => {
   };
 
   const handleUpdate = (updates) => {
-    setPost(prev => ({ ...prev, ...updates }));
+    // Author-voice fields are policy-locked — silently ignore any attempt
+    // (defense-in-depth alongside the backend guard).
+    const ALLOWED_META = ['slug', 'readTime', 'category', 'tags', 'metaTitle', 'metaDescription', 'coverImageAlt', 'coverImageCaption'];
+    const filtered = Object.fromEntries(Object.entries(updates).filter(([k]) => ALLOWED_META.includes(k)));
+    if (Object.keys(filtered).length === 0) return;
+    setPost(prev => ({ ...prev, ...filtered }));
     setHasChanges(true);
   };
 
@@ -294,25 +307,16 @@ const EditorialDetail = () => {
             <Edit3 size={12} />
             <span>Meta</span>
           </button>
-          <button
-            onClick={togglePreview}
-            className={`p-1.5 rounded-lg border text-[11px] font-semibold transition-all shadow-sm flex items-center gap-1.5 ${
-              isPreviewMode
-                ? 'bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 border-neutral-900 dark:border-white'
-                : 'bg-white dark:bg-[#18181b] border-neutral-200/50 dark:border-white/5 text-neutral-550 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-50 dark:hover:bg-white/5'
-            }`}
-          >
-            {isPreviewMode ? <EyeOff size={12} /> : <Eye size={12} />}
-            <span>Preview</span>
-          </button>
-          <button
-            onClick={() => handleAction('save')}
-            disabled={!hasChanges || isProcessing}
-            className="p-1.5 rounded-lg border border-neutral-200/50 dark:border-white/5 bg-white dark:bg-[#18181b] hover:bg-neutral-50 dark:hover:bg-white/5 text-neutral-550 hover:text-neutral-900 dark:hover:text-white transition-all shadow-sm disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5 text-[11px] font-semibold"
-          >
-            <Save size={12} />
-            <span>{isProcessing ? 'Saving' : 'Save'}</span>
-          </button>
+          {hasChanges && (
+            <button
+              onClick={() => handleAction('save')}
+              disabled={isProcessing}
+              className="p-1.5 rounded-lg border border-neutral-200/50 dark:border-white/5 bg-white dark:bg-[#18181b] hover:bg-neutral-50 dark:hover:bg-white/5 text-neutral-550 hover:text-neutral-900 dark:hover:text-white transition-all shadow-sm disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5 text-[11px] font-semibold"
+            >
+              <Save size={12} />
+              <span>{isProcessing ? 'Saving' : 'Save'}</span>
+            </button>
+          )}
           <button
             onClick={() => setShowRejectionPanel(true)}
             className="p-1.5 rounded-lg border border-red-200 dark:border-red-500/20 bg-red-50 dark:bg-red-550/10 hover:bg-red-100 dark:hover:bg-red-500/20 text-red-655 dark:text-red-400 transition-all shadow-sm flex items-center gap-1.5 text-[11px] font-semibold"
@@ -333,17 +337,19 @@ const EditorialDetail = () => {
 
       {/* Editor + Sidebar */}
       <div className="flex-1 flex flex-row overflow-hidden relative">
-        <div className={`flex-1 overflow-y-auto ${isPreviewMode ? 'p-10 max-w-4xl mx-auto' : ''}`}>
+        <div className="flex-1 overflow-y-auto p-10 max-w-4xl mx-auto">
           <div className="h-full bg-white dark:bg-[#151518]/30 border border-neutral-200/40 dark:border-white/5 rounded-2xl m-6 overflow-y-auto p-6 shadow-[0_1px_3px_rgba(0,0,0,0.01)]">
+            {/* Read-only article view — the admin reads and judges; metadata
+                fixes happen in the sidebar, content fixes go back to the writer */}
             <BlockEditor
               title={post.title}
-              onTitleChange={(title) => handleUpdate({ title })}
+              onTitleChange={undefined}
               coverImage={post.coverImage}
-              onCoverImageChange={(url) => handleUpdate({ coverImage: url })}
+              onCoverImageChange={undefined}
               content={normalizeContent(post.content)}
-              onChange={(content) => handleUpdate({ content })}
-              onEditorReady={(editor) => editorRef.current = editor}
-              isPreviewMode={isPreviewMode}
+              onChange={undefined}
+              onEditorReady={(editor) => { editorRef.current = editor; editor?.setEditable?.(false); }}
+              isPreviewMode
               author={activeAuthor}
               hideHeader={false}
               blogId={post.id || post._id || ''}
@@ -379,6 +385,7 @@ const EditorialDetail = () => {
                 value={post.slug || ''}
                 onChange={(e) => handleUpdate({ slug: e.target.value })}
                 className="w-full bg-white dark:bg-[#18181b] border border-neutral-200/60 dark:border-white/5 rounded-lg px-2.5 py-1.5 text-xs text-neutral-800 dark:text-white outline-none focus:border-neutral-400 dark:focus:border-white/20 transition-colors font-mono"
+                title="Platform packaging — admins may repair slugs, but not author content"
               />
             </div>
 
@@ -450,17 +457,18 @@ const EditorialDetail = () => {
               />
             </div>
 
+            {/* Excerpt is author voice — displayed read-only by policy */}
             <div className="bg-neutral-50 dark:bg-[#0c0c0e]/30 rounded-xl p-3.5 border border-neutral-200/40 dark:border-white/5">
-              <div className="flex items-center gap-1.5 mb-2 text-neutral-400 dark:text-neutral-500">
-                <Type size={12} />
-                <span className="text-[9px] font-bold uppercase tracking-wider">Excerpt</span>
+              <div className="flex items-center justify-between mb-2 text-neutral-400 dark:text-neutral-500">
+                <div className="flex items-center gap-1.5">
+                  <Type size={12} />
+                  <span className="text-[9px] font-bold uppercase tracking-wider">Excerpt</span>
+                </div>
+                <span className="text-[8px] font-bold text-neutral-400 uppercase tracking-wider" title="Written by the author — suggest changes via rejection feedback">Author's</span>
               </div>
-              <textarea
-                value={post.excerpt || ''}
-                onChange={(e) => handleUpdate({ excerpt: e.target.value })}
-                rows={3}
-                className="w-full bg-white dark:bg-[#18181b] border border-neutral-200/60 dark:border-white/5 rounded-lg px-2.5 py-1.5 text-xs text-neutral-800 dark:text-white outline-none focus:border-neutral-400 dark:focus:border-white/20 transition-colors resize-none"
-              />
+              <p className="text-[11px] text-neutral-600 dark:text-neutral-400 leading-relaxed">
+                {post.excerpt || <span className="italic text-neutral-400">No excerpt provided</span>}
+              </p>
             </div>
 
             <div className="bg-neutral-50 dark:bg-[#0c0c0e]/30 rounded-xl p-3.5 border border-neutral-200/40 dark:border-white/5">

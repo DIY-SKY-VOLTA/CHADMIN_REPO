@@ -2,6 +2,10 @@ const BlogSubmission = require('../models/BlogSubmission');
 const { deleteSanityPost, updateSanityPost, getAllSanityPosts } = require('../utils/sanityPublisher');
 const { logAction } = require('./activityLogController');
 
+// Author-voice fields admins may NOT change on published posts — same policy
+// as the editorial queue. Content fixes go through unpublish → writer revision.
+const AUTHOR_VOICE_FIELDS = ['title', 'content', 'excerpt'];
+
 exports.listPublished = async (req, res) => {
   try {
     const page = Math.max(1, parseInt(req.query.page) || 1);
@@ -73,6 +77,17 @@ exports.updatePublished = async (req, res) => {
   try {
     const { id } = req.params;
     const updateData = req.body;
+
+    // Policy: published posts run under the author's byline — admins curate
+    // packaging (slug, category, tags, SEO), never the author's words.
+    const blocked = AUTHOR_VOICE_FIELDS.filter((f) => f in updateData);
+    if (blocked.length) {
+      return res.status(403).json({
+        success: false,
+        message: `Author-owned content cannot be edited (${blocked.join(', ')}). Unpublish and return it to the writer with feedback instead.`,
+        blockedFields: blocked,
+      });
+    }
 
     // Check if it's a Sanity-only post (pseudo-id)
     if (!id.match(/^[0-9a-fA-F]{24}$/)) {
