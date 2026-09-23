@@ -43,6 +43,9 @@ const activityLogSchema = new mongoose.Schema({
       "purge_user",
       "logout_all_sessions",
       "bulk_user_action",
+      // Blog moderation (blogController)
+      "delete_submission",
+      "batch_delete_submissions",
     ],
     index: true,
   },
