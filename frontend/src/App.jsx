@@ -128,20 +128,20 @@ function App() {
           element={<ProtectedRoute><ContestForm /></ProtectedRoute>} 
         />
         <Route 
-          path="/contests/:id/edit" 
-          element={<ProtectedRoute><ContestForm /></ProtectedRoute>} 
-        />
-        <Route 
-          path="/contests/:id/details" 
-          element={<ProtectedRoute><ContestDetailsForm /></ProtectedRoute>} 
+          path="/contests/details" 
+          element={<ProtectedRoute><ContestDetails /></ProtectedRoute>} 
         />
         <Route 
           path="/contests/images" 
           element={<ProtectedRoute><ContestImages /></ProtectedRoute>} 
         />
         <Route 
-          path="/contests/details" 
-          element={<ProtectedRoute><ContestDetails /></ProtectedRoute>} 
+          path="/contests/:id/edit" 
+          element={<ProtectedRoute><ContestForm /></ProtectedRoute>} 
+        />
+        <Route 
+          path="/contests/:id/details" 
+          element={<ProtectedRoute><ContestDetailsForm /></ProtectedRoute>} 
         />
         <Route 
           path="/prompts" 

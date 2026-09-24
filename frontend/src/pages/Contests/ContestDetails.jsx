@@ -12,6 +12,7 @@ import {
   Pencil,
   FileText,
   Trash2,
+  Archive,
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import adminAPI from '@/api/adminAPI';
@@ -44,13 +45,13 @@ const Thumb = ({ src, alt }) => {
   const url = src?.backup?.url || src?.primary?.url;
   if (!url || error) {
     return (
-      <div className="w-9 h-9 rounded-lg border border-neutral-200/60 dark:border-white/10 bg-neutral-100 dark:bg-neutral-900/50 flex items-center justify-center">
-        <Trophy size={13} className="text-neutral-400" strokeWidth={1.5} />
+      <div className="w-9 h-9 rounded-md border border-neutral-200/60 dark:border-white/10 bg-neutral-100 dark:bg-neutral-900/50 flex items-center justify-center">
+        <Trophy size={13} className="text-neutral-500 dark:text-neutral-400" strokeWidth={1.5} />
       </div>
     );
   }
   return (
-    <div className="w-9 h-9 rounded-lg border border-neutral-200/60 dark:border-white/10 bg-neutral-100 dark:bg-neutral-900/50 overflow-hidden relative">
+    <div className="w-9 h-9 rounded-md border border-neutral-200/60 dark:border-white/10 bg-neutral-100 dark:bg-neutral-900/50 overflow-hidden relative">
       {!loaded && <div className="absolute inset-0 bg-neutral-100 dark:bg-neutral-900/50 animate-pulse" />}
       <img
         src={url}
@@ -126,7 +127,7 @@ const ContestDetails = () => {
             <FileText size={16} strokeWidth={1.5} className="text-amber-500" />
             Contest Guides
           </h1>
-          <p className="text-[11px] text-neutral-400 dark:text-neutral-500 mt-0.5">
+          <p className="text-[11px] text-neutral-500 dark:text-neutral-400 mt-0.5">
             {pagination.total > 0
               ? `${pagination.total} contest${pagination.total === 1 ? '' : 's'} with a DETAILED GUIDE on the live page`
               : 'Only contests that have a DETAILED GUIDE (contest_details) page'}
@@ -135,16 +136,16 @@ const ContestDetails = () => {
         <div className="flex items-center gap-2">
           <button
             onClick={() => { fetchContests(); toast.success('Refreshed'); }}
-            className="p-1.5 rounded-lg border border-neutral-200/50 dark:border-white/5 bg-white dark:bg-[#18181b] hover:bg-neutral-50 dark:hover:bg-white/5 text-neutral-500 hover:text-neutral-900 dark:hover:text-white transition-all shadow-sm flex items-center gap-1.5 text-[11px] font-medium"
+            className="p-1.5 rounded-md border border-neutral-200/50 dark:border-white/5 bg-white dark:bg-[#18181b] hover:bg-neutral-50 dark:hover:bg-white/5 text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white transition-all shadow-sm flex items-center gap-1.5 text-[11px] font-medium"
           >
-            <RefreshCw size={12} className={isLoading ? 'animate-spin' : ''} />
+            <RefreshCw size={13} className={isLoading ? 'animate-spin' : ''} />
             Refresh
           </button>
           <button
             onClick={() => navigate('/contests')}
-            className="px-3 py-1.5 rounded-lg border border-neutral-200/50 dark:border-white/5 bg-white dark:bg-[#18181b] hover:bg-neutral-50 dark:hover:bg-white/5 text-neutral-500 hover:text-neutral-900 dark:hover:text-white transition-all shadow-sm flex items-center gap-1.5 text-[11px] font-medium"
+            className="px-3 py-1.5 rounded-md border border-neutral-200/50 dark:border-white/5 bg-white dark:bg-[#18181b] hover:bg-neutral-50 dark:hover:bg-white/5 text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white transition-all shadow-sm flex items-center gap-1.5 text-[11px] font-medium"
           >
-            <Trophy size={12} strokeWidth={1.5} />
+            <Trophy size={13} strokeWidth={1.5} />
             All Contests
           </button>
         </div>
@@ -153,17 +154,17 @@ const ContestDetails = () => {
       {/* Control Bar */}
       <div className="shrink-0 px-6 py-3 flex flex-col md:flex-row gap-3 items-center justify-between border-b border-neutral-200/30 dark:border-white/[0.04]">
         <div className="w-full md:w-72 relative">
-          <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400 dark:text-neutral-500" />
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500 dark:text-neutral-400" />
           <input
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search by title, category, slug, tag..."
-            className="w-full pl-9 pr-8 py-1.5 bg-white dark:bg-[#151518] border border-neutral-200/60 dark:border-white/5 rounded-lg text-xs text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 focus:outline-none focus:border-neutral-400 dark:focus:border-neutral-700 transition-all shadow-[0_1px_2px_rgba(0,0,0,0.01)]"
+            className="w-full pl-9 pr-8 py-1.5 bg-white dark:bg-[#151518] border border-neutral-200/60 dark:border-white/5 rounded-md text-xs text-neutral-800 dark:text-neutral-200 placeholder-neutral-500 dark:placeholder-neutral-500 focus:outline-none focus:border-neutral-400 dark:focus:border-neutral-600 transition-all shadow-[0_1px_2px_rgba(0,0,0,0.01)]"
           />
           {search && (
-            <button onClick={() => { setSearch(''); setDebouncedSearch(''); setPage(1); }} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-800 dark:hover:text-white">
-              <X size={12} />
+            <button onClick={() => { setSearch(''); setDebouncedSearch(''); setPage(1); }} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-neutral-500 dark:text-neutral-400 hover:text-neutral-800 dark:hover:text-white">
+              <X size={13} />
             </button>
           )}
         </div>
@@ -172,7 +173,7 @@ const ContestDetails = () => {
           <select
             value={typeFilter}
             onChange={(e) => { setTypeFilter(e.target.value); setPage(1); }}
-            className="px-2.5 py-1.5 bg-white dark:bg-[#151518] border border-neutral-200/60 dark:border-white/5 rounded-lg text-[11px] font-medium text-neutral-600 dark:text-neutral-300 focus:outline-none"
+            className="px-2.5 py-1.5 bg-white dark:bg-[#151518] border border-neutral-200/60 dark:border-white/5 rounded-md text-[11px] font-medium text-neutral-600 dark:text-neutral-400 focus:outline-none"
           >
             <option value="all">All Types</option>
             <option value="contest">Contest</option>
@@ -181,22 +182,22 @@ const ContestDetails = () => {
           <select
             value={statusFilter}
             onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
-            className="px-2.5 py-1.5 bg-white dark:bg-[#151518] border border-neutral-200/60 dark:border-white/5 rounded-lg text-[11px] font-medium text-neutral-600 dark:text-neutral-300 focus:outline-none"
+            className="px-2.5 py-1.5 bg-white dark:bg-[#151518] border border-neutral-200/60 dark:border-white/5 rounded-md text-[11px] font-medium text-neutral-600 dark:text-neutral-400 focus:outline-none"
           >
             <option value="all">All Status</option>
             <option value="open">Open</option>
             <option value="scheduled">Scheduled</option>
             <option value="closed">Closed</option>
           </select>
-          <label className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-white dark:bg-[#151518] border border-neutral-200/60 dark:border-white/5 cursor-pointer text-[11px] font-medium text-neutral-500 dark:text-neutral-400">
+          <label className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-white dark:bg-[#151518] border border-neutral-200/60 dark:border-white/5 cursor-pointer text-[11px] font-medium text-neutral-600 dark:text-neutral-400 hover:bg-neutral-50 dark:hover:bg-white/5">
             <input
               type="checkbox"
               checked={showArchived}
               onChange={(e) => { setShowArchived(e.target.checked); setPage(1); }}
-              className="rounded border-neutral-300 dark:border-neutral-700"
+              className="rounded border-neutral-300 dark:border-neutral-600"
             />
-            <Archive size={11} />
-            Archived
+            <Archive size={12} />
+            <span className="text-neutral-600 dark:text-neutral-400">Archived</span>
           </label>
         </div>
       </div>
@@ -205,17 +206,17 @@ const ContestDetails = () => {
       <div className="flex-1 overflow-y-auto px-6 py-4">
         {isLoading ? (
           <div className="grid grid-cols-1 gap-3 animate-pulse">
-            {[...Array(8)].map((_, i) => <div key={i} className="h-14 bg-neutral-200/50 dark:bg-neutral-800 rounded-xl" />)}
+            {[...Array(8)].map((_, i) => <div key={i} className="h-14 bg-neutral-200/50 dark:bg-neutral-800 rounded-lg" />)}
           </div>
         ) : contests.length === 0 ? (
-          <div className="bg-white dark:bg-[#151518]/40 border border-neutral-200/40 dark:border-white/5 rounded-2xl flex flex-col items-center justify-center py-20 shadow-sm">
-            <FileText size={28} strokeWidth={1.25} className="text-neutral-300 dark:text-neutral-700" />
-            <p className="text-xs font-semibold text-neutral-800 dark:text-neutral-300 mt-3">
+          <div className="bg-white dark:bg-[#151518]/40 border border-neutral-200/40 dark:border-white/5 rounded-lg flex flex-col items-center justify-center py-20 shadow-sm">
+            <FileText size={28} strokeWidth={1.25} className="text-neutral-400 dark:text-neutral-600" />
+            <p className="text-xs font-semibold text-neutral-800 dark:text-neutral-200 mt-3">
               {debouncedSearch || typeFilter !== 'all' || statusFilter !== 'all'
                 ? 'No matching contests found'
                 : 'No DETAILED GUIDE pages yet'}
             </p>
-            <p className="text-[11px] text-neutral-400 mt-1">
+            <p className="text-[11px] text-neutral-500 dark:text-neutral-400 mt-1">
               {debouncedSearch
                 ? 'Try adjusting your search or filters'
                 : 'Open a contest from the Contests page and save a Detailed Guide to see it here'}
@@ -231,9 +232,9 @@ const ContestDetails = () => {
             )}
           </div>
         ) : (
-          <div className="bg-white dark:bg-[#151518]/70 border border-neutral-200/40 dark:border-white/5 rounded-xl overflow-hidden shadow-[0_1px_2px_rgba(0,0,0,0.01)]">
+          <div className="bg-white dark:bg-[#151518]/70 border border-neutral-200/40 dark:border-white/5 rounded-lg overflow-hidden shadow-[0_1px_2px_rgba(0,0,0,0.01)]">
             {/* Header */}
-            <div className="bg-neutral-50/50 dark:bg-neutral-900/30 px-5 py-2.5 flex items-center text-[10px] font-semibold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider">
+            <div className="bg-neutral-50/50 dark:bg-neutral-900/30 px-5 py-2.5 flex items-center text-[10px] font-semibold text-neutral-600 dark:text-neutral-400 uppercase tracking-wider">
               <div className="w-[30%]">Contest</div>
               <div className="w-[13%]">Category</div>
               <div className="w-[9%]">Type</div>
@@ -252,7 +253,7 @@ const ContestDetails = () => {
                   <div
                     key={contest._id}
                     onClick={() => navigate(`/contests/${contest._id}/details`)}
-                    className={`px-5 py-2.5 flex items-center hover:bg-neutral-50 dark:hover:bg-white/5 transition-colors cursor-pointer text-xs text-neutral-700 dark:text-neutral-300 ${contest.archivedAt ? 'opacity-55' : ''}`}
+                    className={`px-5 py-2.5 flex items-center hover:bg-neutral-50 dark:hover:bg-white/5 transition-colors cursor-pointer text-xs text-neutral-800 dark:text-neutral-200 ${contest.archivedAt ? 'opacity-55' : ''}`}
                   >
                     {/* Title */}
                     <div className="w-[30%] flex items-center gap-3 pr-4 min-w-0">
@@ -317,10 +318,10 @@ const ContestDetails = () => {
                     <div className="w-[13%] flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
                       <button
                         onClick={() => navigate(`/contests/${contest._id}/details`)}
-                        className="p-1.5 rounded hover:bg-amber-500/10 text-neutral-500 hover:text-amber-600 dark:hover:text-amber-400 transition-colors"
+                        className="p-1.5 rounded-md hover:bg-amber-500/10 text-neutral-600 dark:text-neutral-400 hover:text-amber-600 dark:hover:text-amber-400 transition-colors"
                         title="Edit DETAILED GUIDE"
                       >
-                        <Sparkles size={13} />
+                        <FileText size={14} />
                       </button>
                       <button
                         onClick={() => navigate(`/contests/${contest._id}/edit`)}
