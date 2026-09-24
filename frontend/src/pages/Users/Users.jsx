@@ -468,11 +468,12 @@ export default function UsersPage() {
       {/* Header */}
       <div className="shrink-0 flex items-center justify-between px-6 py-4 border-b border-neutral-200/50 dark:border-white/5 bg-white/40 dark:bg-[#121214]/40 backdrop-blur-sm">
         <div>
-          <h1 className="text-xl font-semibold tracking-tight text-neutral-900 dark:text-neutral-100">
-            User Management
+          <h1 className="text-base font-semibold text-neutral-900 dark:text-neutral-100 flex items-center gap-2">
+            <Users size={16} strokeWidth={1.5} className="text-neutral-400" />
+            User Manager
           </h1>
-          <p className="text-xs text-neutral-400 dark:text-neutral-500 mt-0.5">
-            {pagination ? `Showing ${users.length} of ${pagination.total} registered users` : 'Manage members, roles, verification, and access'}
+          <p className="text-[11px] text-neutral-400 dark:text-neutral-500 mt-0.5">
+            {pagination ? `Manage ${pagination.total} registered users` : 'Manage members, roles, verification, and access'}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -496,12 +497,12 @@ export default function UsersPage() {
             type="button"
             onClick={() => {
               fetchUsers();
-              toast.success('User database reloaded');
+              toast.success('Users refreshed');
             }}
-            className="p-2 rounded-lg border border-neutral-200/50 dark:border-white/5 bg-white dark:bg-[#18181b] hover:bg-neutral-50 dark:hover:bg-white/5 text-neutral-600 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-white transition-all shadow-sm flex items-center gap-1.5 text-xs font-medium"
+            className="p-1.5 rounded-lg border border-neutral-200/50 dark:border-white/5 bg-white dark:bg-[#18181b] hover:bg-neutral-50 dark:hover:bg-white/5 text-neutral-500 hover:text-neutral-900 dark:hover:text-white transition-all shadow-sm flex items-center gap-1.5 text-[11px] font-medium"
           >
-            <RefreshCw size={13} className={isLoading ? 'animate-spin' : ''} />
-            Reload
+            <RefreshCw size={12} className={isLoading ? 'animate-spin' : ''} />
+            Refresh
           </button>
         </div>
       </div>

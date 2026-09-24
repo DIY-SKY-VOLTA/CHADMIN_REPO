@@ -16,10 +16,14 @@ import {
   Calendar,
   DollarSign,
   Sparkles,
+  Layers,
+  Clock,
+  CheckCircle,
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import adminAPI from '@/api/adminAPI';
 import { listContestCategories } from '@/api/contestAPI';
+import { StatCard } from '@/components/UI';
 
 const STATUS_CONFIG = {
   open: { label: 'Open', bg: 'bg-emerald-500/10', text: 'text-emerald-600 dark:text-emerald-400', border: 'border-emerald-500/15' },
@@ -190,6 +194,12 @@ const Contests = () => {
 
   const totalPages = Math.max(1, pagination.pages || 1);
 
+  // Compute stats from contests data
+  const totalContests = pagination.total || contests.length;
+  const openCount = contests.filter(c => c.status === 'open').length;
+  const scheduledCount = contests.filter(c => c.status === 'scheduled').length;
+  const closedCount = contests.filter(c => c.status === 'closed').length;
+
   return (
     <div className="h-full flex flex-col bg-neutral-50/30 dark:bg-[#0d0d0f]/20 selection:bg-neutral-200/50 dark:selection:bg-neutral-400/40">
       {/* Header */}
@@ -197,11 +207,11 @@ const Contests = () => {
         <div>
           <h1 className="text-base font-semibold text-neutral-900 dark:text-neutral-100 flex items-center gap-2">
             <Trophy size={16} strokeWidth={1.5} className="text-neutral-400" />
-            Contests
+            Contest Manager
           </h1>
           <p className="text-[11px] text-neutral-400 dark:text-neutral-500 mt-0.5">
             {pagination.total > 0
-              ? `${pagination.total} contest${pagination.total === 1 ? '' : 's'}${showArchived ? ' (incl. archived)' : ''}`
+              ? `Manage ${pagination.total} contest${pagination.total === 1 ? '' : 's'}${showArchived ? ' (including archived)' : ''}`
               : 'Add and manage contests — same schema as the automation pipeline'}
           </p>
         </div>
@@ -221,6 +231,37 @@ const Contests = () => {
             Add Contest
           </button>
         </div>
+      </div>
+
+      {/* Stats Cards */}
+      <div className="shrink-0 p-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <StatCard
+          label="Total Contests"
+          value={totalContests}
+          icon={Trophy}
+          iconColor="text-neutral-500"
+        />
+        <StatCard
+          label="Open"
+          value={openCount}
+          icon={CheckCircle}
+          iconColor="text-emerald-600 dark:text-emerald-400"
+          iconBg="bg-emerald-500/10"
+        />
+        <StatCard
+          label="Scheduled"
+          value={scheduledCount}
+          icon={Clock}
+          iconColor="text-blue-600 dark:text-blue-400"
+          iconBg="bg-blue-500/10"
+        />
+        <StatCard
+          label="Closed"
+          value={closedCount}
+          icon={Archive}
+          iconColor="text-neutral-500"
+          iconBg="bg-neutral-500/10"
+        />
       </div>
 
       {/* Control Bar */}

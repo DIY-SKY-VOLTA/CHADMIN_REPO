@@ -176,11 +176,12 @@ export default function CategoriesPage() {
       <div className="shrink-0 flex items-center justify-between px-6 py-4 border-b border-neutral-200/50 dark:border-white/5 bg-white/40 dark:bg-[#121214]/40 backdrop-blur-sm">
         <div>
           <h1 className="text-base font-semibold text-neutral-900 dark:text-neutral-100 flex items-center gap-2">
+            <Tag size={16} strokeWidth={1.5} className="text-neutral-400" />
             Post Category Manager
           </h1>
           <p className="text-[11px] text-neutral-400 dark:text-neutral-500 mt-0.5">
             {categories.length > 0
-              ? `Manage and drag-to-sort ${categories.length} content categories`
+              ? `Manage ${categories.length} content categories`
               : 'Add taxonomies and tags for articles'}
           </p>
         </div>
