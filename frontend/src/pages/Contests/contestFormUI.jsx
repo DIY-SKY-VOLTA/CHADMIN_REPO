@@ -8,23 +8,23 @@ import { copyToClipboard } from '@/utils/clipboard';
 /* ────────────────────────────────────────────────────────────────────────────
    Shared UI primitives for the admin contest forms (ContestForm + details).
    Matches the admin dashboard design system: Tailwind v4, dark mode, neutrals,
-   tiny uppercase tracking labels, rounded-xl cards.
+   tiny uppercase tracking labels, rounded-md inputs, rounded-lg cards.
 ──────────────────────────────────────────────────────────────────────────── */
 
 export const inputCls =
-  'w-full bg-white dark:bg-[#151518] border border-neutral-200/60 dark:border-white/5 rounded-lg px-3 py-2 text-xs text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 focus:outline-none focus:border-neutral-400 dark:focus:border-neutral-700 transition-all shadow-[0_1px_2px_rgba(0,0,0,0.01)]';
+  'w-full bg-white dark:bg-[#151518] border border-neutral-200/60 dark:border-white/5 rounded-md px-3 py-2 text-xs text-neutral-800 dark:text-neutral-200 placeholder-neutral-500 dark:placeholder-neutral-500 focus:outline-none focus:border-neutral-400 dark:focus:border-neutral-600 transition-all shadow-[0_1px_2px_rgba(0,0,0,0.01)]';
 
 export const Field = ({ label, required, hint, className, children, counter }) => (
   <div className={className}>
     <div className="flex items-center justify-between mb-1.5 gap-2">
-      <label className="block text-[10px] font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wider">
+      <label className="block text-[10px] font-semibold text-neutral-600 dark:text-neutral-400 uppercase tracking-wider">
         {label}
         {required && <span className="text-red-500 ml-0.5">*</span>}
       </label>
       {counter}
     </div>
     {children}
-    {hint && <p className="text-[10px] text-neutral-400 dark:text-neutral-500 mt-1 leading-relaxed">{hint}</p>}
+    {hint && <p className="text-[10px] text-neutral-500 dark:text-neutral-500 mt-1 leading-relaxed">{hint}</p>}
   </div>
 );
 
@@ -56,10 +56,10 @@ export const TextInput = ({ value, onChange, placeholder, type = 'text', classNa
         <button
           type="button"
           onClick={handleCopy}
-          className="absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300 transition-colors"
+          className="absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded-md text-neutral-500 dark:text-neutral-400 hover:text-neutral-800 dark:hover:text-neutral-300 transition-colors"
           aria-label="Copy to clipboard"
         >
-          {copied ? <Check size={13} className="text-emerald-500" /> : <Copy size={13} />}
+          {copied ? <Check size={14} className="text-emerald-500" /> : <Copy size={14} />}
         </button>
       )}
     </div>
@@ -240,18 +240,18 @@ export const DateTimePicker = ({ value, onChange, className }) => {
           placeholder="Pick date & time"
           aria-label="Date and time (type YYYY-MM-DD or open the calendar)"
           className={`${inputCls} flex-1 min-w-0 pr-8 text-left cursor-text ${
-            hasDate || typed !== null ? 'text-neutral-900 dark:text-neutral-100' : 'text-neutral-400 dark:text-neutral-500'
+            hasDate || typed !== null ? 'text-neutral-800 dark:text-neutral-200' : 'text-neutral-500 dark:text-neutral-500'
           }`}
         />
         <button
           type="button"
           onClick={() => setOpen((o) => !o)}
-          className="absolute right-2 p-1 rounded-md text-neutral-400 hover:text-neutral-700 dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-white/10 transition-colors"
+          className="absolute right-2 p-1 rounded-md text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-white/10 transition-colors"
           title="Open calendar"
           aria-label="Open calendar"
           tabIndex={-1}
         >
-          <Calendar size={13} />
+          <Calendar size={14} />
         </button>
       </div>
 
@@ -259,7 +259,7 @@ export const DateTimePicker = ({ value, onChange, className }) => {
         createPortal(
           <div
             ref={popRef}
-            className="fixed z-50 bg-white dark:bg-[#18181b] border border-neutral-200/60 dark:border-white/10 rounded-xl shadow-xl shadow-neutral-900/10 dark:shadow-black/40 p-3 space-y-3"
+            className="fixed z-50 bg-white dark:bg-[#18181b] border border-neutral-200/60 dark:border-white/10 rounded-lg shadow-xl shadow-neutral-900/10 dark:shadow-black/40 p-3 space-y-3"
             style={{ top: pos.top, left: pos.left, width: pos.width }}
           >
             {/* Month + year navigation — year jumps matter for backfilling
@@ -269,20 +269,20 @@ export const DateTimePicker = ({ value, onChange, className }) => {
                 <button
                   type="button"
                   onClick={() => setView(new Date(year - 1, month, 1))}
-                  className="p-1 rounded-md hover:bg-neutral-100 dark:hover:bg-white/10 text-neutral-500 dark:text-neutral-400 transition-colors"
+                  className="p-1 rounded hover:bg-neutral-100 dark:hover:bg-white/10 text-neutral-500 dark:text-neutral-400 transition-colors"
                   title="Previous year"
                   aria-label="Previous year"
                 >
-                  <ChevronsLeft size={14} />
+                  <ChevronsLeft size={15} />
                 </button>
                 <button
                   type="button"
                   onClick={() => setView(new Date(year, month - 1, 1))}
-                  className="p-1 rounded-md hover:bg-neutral-100 dark:hover:bg-white/10 text-neutral-500 dark:text-neutral-400 transition-colors"
+                  className="p-1 rounded hover:bg-neutral-100 dark:hover:bg-white/10 text-neutral-500 dark:text-neutral-400 transition-colors"
                   title="Previous month"
                   aria-label="Previous month"
                 >
-                  <ChevronLeft size={14} />
+                  <ChevronLeft size={15} />
                 </button>
               </div>
               <span className="text-[11px] font-semibold text-neutral-800 dark:text-neutral-100">{monthLabel}</span>
@@ -290,20 +290,20 @@ export const DateTimePicker = ({ value, onChange, className }) => {
                 <button
                   type="button"
                   onClick={() => setView(new Date(year, month + 1, 1))}
-                  className="p-1 rounded-md hover:bg-neutral-100 dark:hover:bg-white/10 text-neutral-500 dark:text-neutral-400 transition-colors"
+                  className="p-1 rounded hover:bg-neutral-100 dark:hover:bg-white/10 text-neutral-500 dark:text-neutral-400 transition-colors"
                   title="Next month"
                   aria-label="Next month"
                 >
-                  <ChevronRight size={14} />
+                  <ChevronRight size={15} />
                 </button>
                 <button
                   type="button"
                   onClick={() => setView(new Date(year + 1, month, 1))}
-                  className="p-1 rounded-md hover:bg-neutral-100 dark:hover:bg-white/10 text-neutral-500 dark:text-neutral-400 transition-colors"
+                  className="p-1 rounded hover:bg-neutral-100 dark:hover:bg-white/10 text-neutral-500 dark:text-neutral-400 transition-colors"
                   title="Next year"
                   aria-label="Next year"
                 >
-                  <ChevronsRight size={14} />
+                  <ChevronsRight size={15} />
                 </button>
               </div>
             </div>
@@ -311,7 +311,7 @@ export const DateTimePicker = ({ value, onChange, className }) => {
             {/* Weekday header */}
             <div className="grid grid-cols-7 text-center">
               {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((w, i) => (
-                <span key={i} className="text-[9px] font-semibold text-neutral-400 dark:text-neutral-500 uppercase">
+                <span key={i} className="text-[9px] font-semibold text-neutral-500 dark:text-neutral-500 uppercase">
                   {w}
                 </span>
               ))}
@@ -336,12 +336,12 @@ export const DateTimePicker = ({ value, onChange, className }) => {
                 hasDate ? '' : 'opacity-50'
               }`}
             >
-              <Clock size={12} className="text-neutral-400 shrink-0" />
+              <Clock size={13} className="text-neutral-500 dark:text-neutral-400 shrink-0" />
               <select
                 value={hour}
                 disabled={!hasDate}
                 onChange={(e) => pickHour(e.target.value)}
-                className="flex-1 min-w-0 bg-white dark:bg-[#151518] border border-neutral-200/60 dark:border-white/10 rounded-md px-1.5 py-1 text-[11px] text-neutral-700 dark:text-neutral-200 focus:outline-none focus:border-neutral-400 dark:focus:border-neutral-700 transition-all"
+                className="flex-1 min-w-0 bg-white dark:bg-[#151518] border border-neutral-200/60 dark:border-white/10 rounded-md px-1.5 py-1 text-[11px] text-neutral-700 dark:text-neutral-200 focus:outline-none focus:border-neutral-400 dark:focus:border-neutral-600 transition-all"
               >
                 {Array.from({ length: 24 }, (_, h) => (
                   <option key={h} value={pad2(h)}>
@@ -349,12 +349,12 @@ export const DateTimePicker = ({ value, onChange, className }) => {
                   </option>
                 ))}
               </select>
-              <span className="text-neutral-400 text-[11px]">:</span>
+              <span className="text-neutral-500 dark:text-neutral-500 text-[11px]">:</span>
               <select
                 value={minute}
                 disabled={!hasDate}
                 onChange={(e) => pickMinute(e.target.value)}
-                className="flex-1 min-w-0 bg-white dark:bg-[#151518] border border-neutral-200/60 dark:border-white/10 rounded-md px-1.5 py-1 text-[11px] text-neutral-700 dark:text-neutral-200 focus:outline-none focus:border-neutral-400 dark:focus:border-neutral-700 transition-all"
+                className="flex-1 min-w-0 bg-white dark:bg-[#151518] border border-neutral-200/60 dark:border-white/10 rounded-md px-1.5 py-1 text-[11px] text-neutral-700 dark:text-neutral-200 focus:outline-none focus:border-neutral-400 dark:focus:border-neutral-600 transition-all"
               >
                 {Array.from({ length: 60 }, (_, m) => (
                   <option key={m} value={pad2(m)}>
@@ -362,7 +362,7 @@ export const DateTimePicker = ({ value, onChange, className }) => {
                   </option>
                 ))}
               </select>
-              <span className="text-[9px] text-neutral-400 dark:text-neutral-500 ml-1 shrink-0">UTC</span>
+              <span className="text-[9px] text-neutral-500 dark:text-neutral-500 ml-1 shrink-0">UTC</span>
             </div>
 
             {/* Footer */}
@@ -371,7 +371,7 @@ export const DateTimePicker = ({ value, onChange, className }) => {
                 <button
                   type="button"
                   onClick={setToday}
-                  className="px-2 py-1 rounded-md text-[10px] font-semibold text-blue-600 dark:text-blue-400 hover:bg-blue-500/10 transition-colors"
+                  className="px-2 py-1 rounded text-[10px] font-semibold text-blue-600 dark:text-blue-400 hover:bg-blue-500/10 transition-colors"
                 >
                   Today
                 </button>
@@ -382,7 +382,7 @@ export const DateTimePicker = ({ value, onChange, className }) => {
                       onChange('');
                       setOpen(false);
                     }}
-                    className="px-2 py-1 rounded-md text-[10px] font-semibold text-red-500 hover:bg-red-500/10 transition-colors"
+                    className="px-2 py-1 rounded text-[10px] font-semibold text-red-500 dark:text-red-400 hover:bg-red-500/10 transition-colors"
                   >
                     Clear
                   </button>
@@ -391,7 +391,7 @@ export const DateTimePicker = ({ value, onChange, className }) => {
               <button
                 type="button"
                 onClick={() => setOpen(false)}
-                className="px-2.5 py-1 rounded-md bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 text-[10px] font-semibold hover:opacity-90 transition-all"
+                className="px-2.5 py-1 rounded bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 text-[10px] font-semibold hover:opacity-90 transition-all"
               >
                 Done
               </button>
@@ -431,10 +431,10 @@ export const TextArea = ({ value, onChange, placeholder, rows = 3, className }) 
         <button
           type="button"
           onClick={handleCopy}
-          className="absolute right-3 top-3 p-1 rounded text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300 transition-colors"
+          className="absolute right-3 top-3 p-1 rounded-md text-neutral-500 dark:text-neutral-400 hover:text-neutral-800 dark:hover:text-neutral-300 transition-colors"
           aria-label="Copy to clipboard"
         >
-          {copied ? <Check size={13} className="text-emerald-500" /> : <Copy size={13} />}
+          {copied ? <Check size={14} className="text-emerald-500" /> : <Copy size={14} />}
         </button>
       )}
     </div>
@@ -459,7 +459,7 @@ export const Select = ({ value, onChange, options, placeholder, className }) => 
 );
 
 export const Segmented = ({ value, options, onChange }) => (
-  <div className="inline-flex p-0.5 rounded-lg bg-neutral-100 dark:bg-neutral-900/60 border border-neutral-200/40 dark:border-white/5 gap-0.5 shadow-inner">
+  <div className="inline-flex p-0.5 rounded-md bg-neutral-100 dark:bg-neutral-900/60 border border-neutral-200/40 dark:border-white/5 gap-0.5 shadow-inner">
     {options.map((opt) => {
       const active = value === opt.value;
       return (
@@ -467,10 +467,10 @@ export const Segmented = ({ value, options, onChange }) => (
           key={String(opt.value)}
           type="button"
           onClick={() => onChange(opt.value)}
-          className={`px-3 py-1 text-[11px] font-medium rounded-md transition-all ${
+          className={`px-3 py-1 text-[11px] font-medium rounded transition-all ${
             active
               ? 'bg-white dark:bg-[#1b1b1e] text-neutral-900 dark:text-white shadow-sm'
-              : 'text-neutral-500 dark:text-neutral-400 hover:text-neutral-800 dark:hover:text-neutral-300'
+              : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-800 dark:hover:text-neutral-300'
           }`}
         >
           {opt.label}
@@ -489,10 +489,10 @@ export const ChipGroup = ({ value = [], options, onChange }) => (
           key={opt.value}
           type="button"
           onClick={() => onChange(active ? value.filter((v) => v !== opt.value) : [...value, opt.value])}
-          className={`px-2.5 py-1 rounded-md text-[11px] font-medium border transition-all ${
+          className={`px-2.5 py-1 rounded text-[11px] font-medium border transition-all ${
             active
               ? 'bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 border-neutral-900 dark:border-white shadow-sm'
-              : 'bg-white dark:bg-[#151518] text-neutral-500 dark:text-neutral-400 border-neutral-200/60 dark:border-white/10 hover:border-neutral-400 dark:hover:border-neutral-600'
+              : 'bg-white dark:bg-[#151518] text-neutral-600 dark:text-neutral-400 border-neutral-200/60 dark:border-white/10 hover:border-neutral-400 dark:hover:border-neutral-600'
           }`}
         >
           {opt.label}
@@ -548,9 +548,9 @@ export const ChipInput = ({ value = [], onChange, max, placeholder, hint, kebab 
         <button
           type="button"
           onClick={add}
-          className="shrink-0 px-3 py-2 rounded-lg border border-neutral-200/60 dark:border-white/5 bg-white dark:bg-[#18181b] hover:bg-neutral-50 dark:hover:bg-white/5 text-neutral-500 hover:text-neutral-900 dark:hover:text-white transition-all shadow-sm flex items-center gap-1 text-[11px] font-medium"
+          className="shrink-0 px-3 py-2 rounded-md border border-neutral-200/60 dark:border-white/5 bg-white dark:bg-[#18181b] hover:bg-neutral-50 dark:hover:bg-white/5 text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white transition-all shadow-sm flex items-center gap-1 text-[11px] font-medium"
         >
-          <Plus size={12} />
+          <Plus size={13} />
           Add
         </button>
       </div>
@@ -559,21 +559,21 @@ export const ChipInput = ({ value = [], onChange, max, placeholder, hint, kebab 
           {value.map((chip) => (
             <span
               key={chip}
-              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-neutral-100 dark:bg-neutral-800/50 border border-neutral-200/50 dark:border-white/5 text-[11px] text-neutral-600 dark:text-neutral-300"
+              className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800/50 border border-neutral-200/50 dark:border-white/5 text-[11px] text-neutral-600 dark:text-neutral-400"
             >
               {chip}
               <button
                 type="button"
                 onClick={() => onChange(value.filter((c) => c !== chip))}
-                className="text-neutral-400 hover:text-red-500 transition-colors"
+                className="text-neutral-500 dark:text-neutral-400 hover:text-red-500 dark:hover:text-red-400 transition-colors"
               >
-                <X size={11} />
+                <X size={12} />
               </button>
             </span>
           ))}
         </div>
       )}
-      {hint && <p className="text-[10px] text-neutral-400 dark:text-neutral-500">{hint}</p>}
+      {hint && <p className="text-[10px] text-neutral-500 dark:text-neutral-500">{hint}</p>}
     </div>
   );
 };
@@ -593,27 +593,27 @@ export const ListItemEditor = ({ items = [], onChange, fields, addLabel = 'Add I
   };
   return (
     <div className="space-y-2">
-      {items.length === 0 && <p className="text-[11px] text-neutral-400 italic">{emptyText}</p>}
+      {items.length === 0 && <p className="text-[11px] text-neutral-500 dark:text-neutral-500 italic">{emptyText}</p>}
       {items.map((item, idx) => (
         <div
           key={idx}
-          className="border border-neutral-200/40 dark:border-white/5 rounded-lg p-3 bg-neutral-50/40 dark:bg-[#1b1b1e]/30 space-y-2.5"
+          className="border border-neutral-200/40 dark:border-white/5 rounded-md p-3 bg-neutral-50/40 dark:bg-[#1b1b1e]/30 space-y-2.5"
         >
           <div className="flex items-center justify-between">
-            <span className="text-[9px] font-bold text-neutral-400 uppercase tracking-wider">Item {idx + 1}</span>
+            <span className="text-[9px] font-bold text-neutral-500 dark:text-neutral-500 uppercase tracking-wider">Item {idx + 1}</span>
             <button
               type="button"
               onClick={() => removeItem(idx)}
-              className="p-1 rounded hover:bg-red-500/10 text-neutral-400 hover:text-red-500 transition-colors"
+              className="p-1 rounded-md hover:bg-red-500/10 text-neutral-500 dark:text-neutral-400 hover:text-red-500 dark:hover:text-red-400 transition-colors"
               title="Remove item"
             >
-              <Trash2 size={12} />
+              <Trash2 size={13} />
             </button>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
             {fields.map((f) => (
               <div key={f.key} className={f.full ? 'sm:col-span-2' : ''}>
-                <label className="block text-[9px] font-semibold text-neutral-400 uppercase tracking-wider mb-1">
+                <label className="block text-[9px] font-semibold text-neutral-500 dark:text-neutral-500 uppercase tracking-wider mb-1">
                   {f.label}
                 </label>
                 {f.type === 'textarea' ? (
@@ -640,9 +640,9 @@ export const ListItemEditor = ({ items = [], onChange, fields, addLabel = 'Add I
       <button
         type="button"
         onClick={addItem}
-        className="w-full py-2 rounded-lg border border-dashed border-neutral-300/60 dark:border-white/10 text-[11px] font-medium text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200 hover:border-neutral-400 dark:hover:border-neutral-600 transition-all flex items-center justify-center gap-1.5"
+        className="w-full py-2 rounded-md border border-dashed border-neutral-300/60 dark:border-white/10 text-[11px] font-medium text-neutral-600 dark:text-neutral-400 hover:text-neutral-800 dark:hover:text-neutral-200 hover:border-neutral-400 dark:hover:border-neutral-600 transition-all flex items-center justify-center gap-1.5"
       >
-        <Plus size={12} />
+        <Plus size={13} />
         {addLabel}
       </button>
     </div>
@@ -650,24 +650,24 @@ export const ListItemEditor = ({ items = [], onChange, fields, addLabel = 'Add I
 };
 
 export const SectionCard = ({ title, desc, icon: Icon, open, onToggle, children }) => (
-  <div className="bg-white dark:bg-[#151518]/70 border border-neutral-200/40 dark:border-white/5 rounded-xl overflow-hidden shadow-[0_1px_2px_rgba(0,0,0,0.01)]">
+  <div className="bg-white dark:bg-[#151518]/70 border border-neutral-200/40 dark:border-white/5 rounded-lg overflow-hidden shadow-[0_1px_2px_rgba(0,0,0,0.01)]">
     <button
       type="button"
       onClick={onToggle}
       className="w-full px-5 py-3.5 flex items-center justify-between gap-3 hover:bg-neutral-50 dark:hover:bg-white/[0.03] transition-colors"
     >
       <div className="flex items-center gap-3 min-w-0">
-        <div className="w-8 h-8 rounded-lg bg-neutral-100 dark:bg-neutral-800/50 border border-neutral-200/50 dark:border-white/5 flex items-center justify-center text-neutral-500 dark:text-neutral-400 shrink-0">
-          <Icon size={15} strokeWidth={1.5} />
+        <div className="w-8 h-8 rounded-md bg-neutral-100 dark:bg-neutral-800/50 border border-neutral-200/50 dark:border-white/5 flex items-center justify-center text-neutral-500 dark:text-neutral-400 shrink-0">
+          <Icon size={16} strokeWidth={1.5} />
         </div>
         <div className="min-w-0 text-left">
           <h3 className="text-xs font-semibold text-neutral-900 dark:text-neutral-100">{title}</h3>
-          <p className="text-[10px] text-neutral-400 dark:text-neutral-500 mt-0.5 truncate">{desc}</p>
+          <p className="text-[10px] text-neutral-500 dark:text-neutral-500 mt-0.5 truncate">{desc}</p>
         </div>
       </div>
       <ChevronDown
-        size={15}
-        className={`text-neutral-400 shrink-0 transition-transform duration-200 ${open ? 'rotate-180' : ''}`}
+        size={16}
+        className={`text-neutral-500 dark:text-neutral-400 shrink-0 transition-transform duration-200 ${open ? 'rotate-180' : ''}`}
       />
     </button>
     <AnimatePresence initial={false}>

@@ -660,19 +660,19 @@ const ContestForm = () => {
         <div className="flex items-center gap-3 min-w-0">
           <button
             onClick={() => navigate('/contests')}
-            className="p-1.5 rounded-lg border border-neutral-200/50 dark:border-white/5 bg-white dark:bg-[#18181b] hover:bg-neutral-50 dark:hover:bg-white/5 text-neutral-500 hover:text-neutral-900 dark:hover:text-white transition-all shadow-sm shrink-0"
+            className="p-1.5 rounded-md border border-neutral-200/50 dark:border-white/5 bg-white dark:bg-[#18181b] hover:bg-neutral-50 dark:hover:bg-white/5 text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white transition-all shadow-sm shrink-0"
             title="Back to contests"
           >
-            <ArrowLeft size={14} />
+            <ArrowLeft size={15} />
           </button>
           <div className="min-w-0">
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-neutral-400 dark:text-neutral-500">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-neutral-600 dark:text-neutral-400">
               {isEditing ? 'Edit Contest' : 'Add Contest'}
             </p>
             <h1 className="text-base font-semibold text-neutral-900 dark:text-neutral-100 leading-snug mt-1" title={form.title}>
               {isEditing ? form.title || 'Untitled contest' : 'Create a new contest'}
             </h1>
-            <p className="text-[11px] text-neutral-400 dark:text-neutral-500 mt-0.5 truncate">
+            <p className="text-[11px] text-neutral-500 dark:text-neutral-400 mt-0.5 truncate">
               {isEditing ? 'Pipeline v4.1 schema — changes apply to the live page' : 'Same schema as the automation pipeline'}
             </p>
           </div>
@@ -680,16 +680,16 @@ const ContestForm = () => {
         <div className="flex items-center gap-2 shrink-0">
           <button
             onClick={() => navigate('/contests')}
-            className="px-3 py-1.5 rounded-lg border border-neutral-200/50 dark:border-white/5 bg-white dark:bg-[#18181b] hover:bg-neutral-50 dark:hover:bg-white/5 text-neutral-500 hover:text-neutral-900 dark:hover:text-white transition-all shadow-sm text-[11px] font-medium"
+            className="px-3 py-1.5 rounded-md border border-neutral-200/50 dark:border-white/5 bg-white dark:bg-[#18181b] hover:bg-neutral-50 dark:hover:bg-white/5 text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white transition-all shadow-sm text-[11px] font-medium"
           >
             Cancel
           </button>
           <button
             onClick={handleSave}
             disabled={isLoading || isSaving}
-            className="px-4 py-1.5 rounded-lg bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 hover:opacity-90 transition-all shadow-sm flex items-center gap-1.5 text-[11px] font-semibold disabled:opacity-40"
+            className="px-4 py-1.5 rounded-md bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 hover:opacity-90 transition-all shadow-sm flex items-center gap-1.5 text-[11px] font-semibold disabled:opacity-40"
           >
-            {isSaving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} strokeWidth={2.5} />}
+            {isSaving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} strokeWidth={2.5} />}
             {isSaving ? 'Saving…' : isEditing ? 'Save Changes' : 'Create Contest'}
           </button>
         </div>
@@ -700,24 +700,24 @@ const ContestForm = () => {
         {isLoading ? (
           <div className="max-w-5xl mx-auto space-y-3 animate-pulse">
             {[...Array(5)].map((_, i) => (
-              <div key={i} className="h-16 bg-neutral-200/50 dark:bg-neutral-800 rounded-xl" />
+              <div key={i} className="h-16 bg-neutral-200/50 dark:bg-neutral-800 rounded-lg" />
             ))}
           </div>
         ) : (
           <div className="max-w-5xl mx-auto space-y-4">
             {/* Utility row */}
             <div className="flex items-center justify-between">
-              <p className="text-[10px] text-neutral-400 dark:text-neutral-500">
+              <p className="text-[10px] text-neutral-500 dark:text-neutral-500">
                 <span className="text-red-500 mr-0.5">*</span> Required · empty values are saved as{' '}
-                <code className="font-mono bg-neutral-100 dark:bg-neutral-800/50 px-1 py-0.5 rounded text-[9px]">null</code>
+                <code className="font-mono bg-neutral-100 dark:bg-neutral-800/50 px-1 py-0.5 rounded-md text-[9px]">null</code>
               </p>
               <div className="flex items-center gap-1.5">
                 <button
                   type="button"
                   onClick={allOpen ? collapseAll : expandAll}
-                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-neutral-200/50 dark:border-white/5 bg-white dark:bg-[#151518] hover:bg-neutral-50 dark:hover:bg-white/5 text-neutral-500 hover:text-neutral-900 dark:hover:text-white transition-all shadow-sm text-[11px] font-medium"
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-neutral-200/50 dark:border-white/5 bg-white dark:bg-[#151518] hover:bg-neutral-50 dark:hover:bg-white/5 text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white transition-all shadow-sm text-[11px] font-medium"
                 >
-                  {allOpen ? <Shrink size={11} /> : <Expand size={11} />}
+                  {allOpen ? <Shrink size={12} /> : <Expand size={12} />}
                   {allOpen ? 'Collapse All' : 'Expand All'}
                 </button>
               </div>
@@ -770,13 +770,13 @@ const ContestForm = () => {
                       rel="noopener noreferrer"
                       onClick={(e) => { if (!form.link) e.preventDefault(); }}
                       title={form.link ? 'Open official link in new tab' : 'Enter a link above to open it'}
-                      className={`shrink-0 w-9 px-0 py-2 rounded-lg border flex items-center justify-center transition-all shadow-sm ${
+                      className={`shrink-0 w-9 px-0 py-2 rounded-md border flex items-center justify-center transition-all shadow-sm ${
                         form.link
-                          ? 'border-neutral-200/60 dark:border-white/5 bg-white dark:bg-[#18181b] text-neutral-500 hover:text-blue-600 dark:hover:text-blue-400 hover:border-blue-500/30 hover:bg-blue-500/5 cursor-pointer'
-                          : 'border-neutral-200/40 dark:border-white/5 bg-neutral-50 dark:bg-[#151518] text-neutral-300 dark:text-neutral-600 cursor-not-allowed'
+                          ? 'border-neutral-200/60 dark:border-white/5 bg-white dark:bg-[#18181b] text-neutral-600 dark:text-neutral-400 hover:text-blue-600 dark:hover:text-blue-400 hover:border-blue-500/30 hover:bg-blue-500/5 cursor-pointer'
+                          : 'border-neutral-200/40 dark:border-white/5 bg-neutral-50 dark:bg-[#151518] text-neutral-400 dark:text-neutral-500 cursor-not-allowed'
                       }`}
                     >
-                      <ExternalLink size={13} />
+                      <ExternalLink size={14} />
                     </a>
                   </div>
                 </Field>
@@ -861,18 +861,18 @@ const ContestForm = () => {
 
               <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
                 {/* Preview */}
-                <div className="bg-neutral-50/50 dark:bg-[#1b1b1e]/30 border border-neutral-200/30 dark:border-white/5 rounded-xl p-3 flex items-center justify-center min-h-[160px] overflow-hidden relative">
+                <div className="bg-neutral-50/50 dark:bg-[#1b1b1e]/30 border border-neutral-200/30 dark:border-white/5 rounded-lg p-3 flex items-center justify-center min-h-[160px] overflow-hidden relative">
                   {previewSrc && !imageErr ? (
                     <img
                       src={previewSrc}
                       alt={form.image.alt || 'Preview'}
-                      className="max-h-[200px] w-full object-contain rounded-lg"
+                      className="max-h-[200px] w-full object-contain rounded-md"
                       onError={() => setImageErr(true)}
                     />
                   ) : (
                     <div className="text-center py-8">
-                      <ImageIcon size={28} className="text-neutral-300 dark:text-neutral-600 mx-auto mb-2" strokeWidth={1.25} />
-                      <p className="text-[10px] text-neutral-400">
+                      <ImageIcon size={28} className="text-neutral-400 dark:text-neutral-600 mx-auto mb-2" strokeWidth={1.25} />
+                      <p className="text-[10px] text-neutral-500 dark:text-neutral-500">
                         {imageErr ? 'Image failed to load' : 'No image yet'}
                       </p>
                     </div>
@@ -891,13 +891,13 @@ const ContestForm = () => {
                   <button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
-                    className="flex-1 min-h-[100px] border-2 border-dashed border-neutral-300/40 dark:border-neutral-700/40 hover:border-neutral-400 dark:hover:border-neutral-600 bg-neutral-50/30 dark:bg-[#1b1b1e]/20 rounded-xl flex flex-col items-center justify-center gap-2 transition-all text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300"
+                    className="flex-1 min-h-[100px] border-2 border-dashed border-neutral-300/40 dark:border-neutral-700/40 hover:border-neutral-400 dark:hover:border-neutral-600 bg-neutral-50/30 dark:bg-[#1b1b1e]/20 rounded-lg flex flex-col items-center justify-center gap-2 transition-all text-neutral-500 dark:text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300"
                   >
-                    <Upload size={22} strokeWidth={1.5} />
-                    <span className="text-[11px] font-medium">
+                    <Upload size={23} strokeWidth={1.5} />
+                    <span className="text-[11px] font-medium text-neutral-600 dark:text-neutral-400">
                       {localFile ? localFile.name : 'Upload local image'}
                     </span>
-                    <span className="text-[9px] text-neutral-400 dark:text-neutral-500">
+                    <span className="text-[9px] text-neutral-500 dark:text-neutral-500">
                       PNG / JPEG / WebP — max 15MB
                     </span>
                   </button>
@@ -1455,10 +1455,10 @@ const ContestForm = () => {
               >
                 <div className="flex items-start justify-between gap-4 flex-col md:flex-row">
                   <div className="min-w-0">
-                    <p className="text-xs font-medium text-neutral-700 dark:text-neutral-300">
+                    <p className="text-xs font-medium text-neutral-800 dark:text-neutral-200">
                       Add DETAILED GUIDE content now?
                     </p>
-                    <p className="text-[11px] text-neutral-400 dark:text-neutral-500 mt-1 leading-relaxed">
+                    <p className="text-[11px] text-neutral-500 dark:text-neutral-500 mt-1 leading-relaxed">
                       The contest detail page renders a rich guide (Why Join, Benefits, Submission
                       Guide, FAQ…). You can fill it in right after creating the contest, or add it
                       later from the contests list.
@@ -1487,10 +1487,10 @@ const ContestForm = () => {
               >
                 <div className="flex items-center justify-between gap-4">
                   <div className="min-w-0">
-                    <p className="text-xs font-medium text-neutral-700 dark:text-neutral-300">
+                    <p className="text-xs font-medium text-neutral-800 dark:text-neutral-200">
                       DETAILED GUIDE content
                     </p>
-                    <p className="text-[11px] text-neutral-400 dark:text-neutral-500 mt-1 leading-relaxed">
+                    <p className="text-[11px] text-neutral-500 dark:text-neutral-500 mt-1 leading-relaxed">
                       Why Join, Benefits, Submission Guide, FAQ, Timeline Summary, SEO & research
                       sources. Shown on the live contest page — add or edit it any time.
                     </p>
@@ -1498,7 +1498,7 @@ const ContestForm = () => {
                   <button
                     type="button"
                     onClick={() => navigate(`/contests/${id}/details`)}
-                    className="shrink-0 px-3 py-1.5 rounded-lg border border-neutral-200/50 dark:border-white/5 bg-white dark:bg-[#18181b] hover:bg-neutral-50 dark:hover:bg-white/5 text-neutral-600 hover:text-neutral-900 dark:hover:text-white transition-all shadow-sm text-[11px] font-medium"
+                    className="shrink-0 px-3 py-1.5 rounded-md border border-neutral-200/50 dark:border-white/5 bg-white dark:bg-[#18181b] hover:bg-neutral-50 dark:hover:bg-white/5 text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white transition-all shadow-sm text-[11px] font-medium"
                   >
                     Edit Detailed Guide
                   </button>
@@ -1538,7 +1538,7 @@ const ContestForm = () => {
                 </Field>
                 {isEditing && (
                   <Field label="Archived At" hint="Read-only — manage archiving from the list page">
-                    <div className={`${inputCls} flex items-center text-neutral-400 dark:text-neutral-500`}>
+                    <div className={`${inputCls} flex items-center text-neutral-500 dark:text-neutral-500`}>
                       {form.archivedAt ? new Date(form.archivedAt).toLocaleString() : 'Not archived'}
                     </div>
                   </Field>
@@ -1550,16 +1550,16 @@ const ContestForm = () => {
             <div className="flex items-center justify-end gap-2 pb-4">
               <button
                 onClick={() => navigate('/contests')}
-                className="px-4 py-2 rounded-lg border border-neutral-200/50 dark:border-white/5 bg-white dark:bg-[#18181b] hover:bg-neutral-50 dark:hover:bg-white/5 text-neutral-500 hover:text-neutral-900 dark:hover:text-white transition-all shadow-sm text-[11px] font-medium"
+                className="px-4 py-2 rounded-md border border-neutral-200/50 dark:border-white/5 bg-white dark:bg-[#18181b] hover:bg-neutral-50 dark:hover:bg-white/5 text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white transition-all shadow-sm text-[11px] font-medium"
               >
                 Cancel
               </button>
               <button
                 onClick={handleSave}
                 disabled={isLoading || isSaving}
-                className="px-5 py-2 rounded-lg bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 hover:opacity-90 transition-all shadow-sm flex items-center gap-1.5 text-[11px] font-semibold disabled:opacity-40"
+                className="px-5 py-2 rounded-md bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 hover:opacity-90 transition-all shadow-sm flex items-center gap-1.5 text-[11px] font-semibold disabled:opacity-40"
               >
-                {isSaving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} strokeWidth={2.5} />}
+                {isSaving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} strokeWidth={2.5} />}
                 {isSaving ? 'Saving…' : isEditing ? 'Save Changes' : 'Create Contest'}
               </button>
             </div>

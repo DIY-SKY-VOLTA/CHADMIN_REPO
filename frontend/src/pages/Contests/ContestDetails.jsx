@@ -10,9 +10,8 @@ import {
   RefreshCw,
   ExternalLink,
   Pencil,
-  Sparkles,
-  Archive,
   FileText,
+  Trash2,
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import adminAPI from '@/api/adminAPI';
@@ -20,7 +19,7 @@ import adminAPI from '@/api/adminAPI';
 const STATUS_CONFIG = {
   open: { label: 'Open', bg: 'bg-emerald-500/10', text: 'text-emerald-600 dark:text-emerald-400', border: 'border-emerald-500/15' },
   scheduled: { label: 'Scheduled', bg: 'bg-blue-500/10', text: 'text-blue-600 dark:text-blue-400', border: 'border-blue-500/15' },
-  closed: { label: 'Closed', bg: 'bg-neutral-500/10', text: 'text-neutral-500 dark:text-neutral-400', border: 'border-neutral-500/15' },
+  closed: { label: 'Closed', bg: 'bg-neutral-500/10', text: 'text-neutral-600 dark:text-neutral-400', border: 'border-neutral-500/15' },
 };
 
 const GUIDE_STATUS_CONFIG = {

@@ -307,14 +307,14 @@ const ContestDetailsForm = () => {
         <div className="flex items-center gap-3 min-w-0">
           <button
             onClick={() => navigate('/contests')}
-            className="p-1.5 rounded-lg border border-neutral-200/50 dark:border-white/5 bg-white dark:bg-[#18181b] hover:bg-neutral-50 dark:hover:bg-white/5 text-neutral-500 hover:text-neutral-900 dark:hover:text-white transition-all shadow-sm shrink-0"
+            className="p-1.5 rounded-md border border-neutral-200/50 dark:border-white/5 bg-white dark:bg-[#18181b] hover:bg-neutral-50 dark:hover:bg-white/5 text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white transition-all shadow-sm shrink-0"
             title="Back to contests"
           >
-            <ArrowLeft size={14} />
+            <ArrowLeft size={15} />
           </button>
           <div className="min-w-0">
             <div className="flex items-baseline gap-3 min-w-0">
-              <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wider text-neutral-400 dark:text-neutral-500">
+              <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wider text-neutral-600 dark:text-neutral-400">
                 Detailed Guide{existing ? ` · v${existing.version || 1}` : ' · no guide yet'}
               </span>
               <h1 className="text-base font-semibold text-neutral-900 dark:text-neutral-100 leading-snug truncate" title={contest?.title}>
@@ -322,7 +322,7 @@ const ContestDetailsForm = () => {
               </h1>
             </div>
             {contest && (
-              <p className="text-[11px] text-neutral-400 dark:text-neutral-500 mt-0.5 truncate">
+              <p className="text-[11px] text-neutral-500 dark:text-neutral-400 mt-0.5 truncate">
                 {[contest.type, contest.category, contest.status].filter(Boolean).join(' · ')}
               </p>
             )}
@@ -333,24 +333,24 @@ const ContestDetailsForm = () => {
             <button
               onClick={handleDelete}
               disabled={isDeleting}
-              className="px-3 py-1.5 rounded-lg border border-red-200/60 dark:border-red-500/20 bg-white dark:bg-[#18181b] hover:bg-red-50 dark:hover:bg-red-500/10 text-red-600 dark:text-red-400 hover:text-red-700 transition-all shadow-sm text-[11px] font-medium disabled:opacity-40 flex items-center gap-1.5"
+              className="px-3 py-1.5 rounded-md border border-red-200/60 dark:border-red-500/20 bg-white dark:bg-[#18181b] hover:bg-red-50 dark:hover:bg-red-500/10 text-red-600 dark:text-red-400 hover:text-red-700 transition-all shadow-sm text-[11px] font-medium disabled:opacity-40 flex items-center gap-1.5"
             >
-              {isDeleting ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
+              {isDeleting ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
               Delete
             </button>
           )}
           <button
             onClick={() => navigate('/contests')}
-            className="px-3 py-1.5 rounded-lg border border-neutral-200/50 dark:border-white/5 bg-white dark:bg-[#18181b] hover:bg-neutral-50 dark:hover:bg-white/5 text-neutral-500 hover:text-neutral-900 dark:hover:text-white transition-all shadow-sm text-[11px] font-medium"
+            className="px-3 py-1.5 rounded-md border border-neutral-200/50 dark:border-white/5 bg-white dark:bg-[#18181b] hover:bg-neutral-50 dark:hover:bg-white/5 text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white transition-all shadow-sm text-[11px] font-medium"
           >
             Cancel
           </button>
           <button
             onClick={handleSave}
             disabled={isLoading || isSaving}
-            className="px-4 py-1.5 rounded-lg bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 hover:opacity-90 transition-all shadow-sm flex items-center gap-1.5 text-[11px] font-semibold disabled:opacity-40"
+            className="px-4 py-1.5 rounded-md bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 hover:opacity-90 transition-all shadow-sm flex items-center gap-1.5 text-[11px] font-semibold disabled:opacity-40"
           >
-            {isSaving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} strokeWidth={2.5} />}
+            {isSaving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} strokeWidth={2.5} />}
             {isSaving ? 'Saving…' : 'Save Detailed Guide'}
           </button>
         </div>
@@ -361,26 +361,26 @@ const ContestDetailsForm = () => {
         {isLoading ? (
           <div className="max-w-5xl mx-auto space-y-3 animate-pulse">
             {[...Array(5)].map((_, i) => (
-              <div key={i} className="h-16 bg-neutral-200/50 dark:bg-neutral-800 rounded-xl" />
+              <div key={i} className="h-16 bg-neutral-200/50 dark:bg-neutral-800 rounded-lg" />
             ))}
           </div>
         ) : (
           <div className="max-w-5xl mx-auto space-y-4">
             {/* Utility row */}
             <div className="flex items-center justify-between">
-              <p className="text-[10px] text-neutral-400 dark:text-neutral-500 flex items-center gap-1.5">
+              <p className="text-[10px] text-neutral-500 dark:text-neutral-500 flex items-center gap-1.5">
                 <CheckCircle2 size={11} className="text-emerald-500" />
                 Renders as the DETAILED GUIDE on the live contest page · empty fields are hidden
                 {existing && sectionCount > 0 && (
-                  <span className="font-mono text-neutral-400"> · {sectionCount} populated sections</span>
+                  <span className="font-mono text-neutral-500"> · {sectionCount} populated sections</span>
                 )}
               </p>
               <button
                 type="button"
                 onClick={allOpen ? collapseAll : expandAll}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-neutral-200/50 dark:border-white/5 bg-white dark:bg-[#151518] hover:bg-neutral-50 dark:hover:bg-white/5 text-neutral-500 hover:text-neutral-900 dark:hover:text-white transition-all shadow-sm text-[11px] font-medium"
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-neutral-200/50 dark:border-white/5 bg-white dark:bg-[#151518] hover:bg-neutral-50 dark:hover:bg-white/5 text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white transition-all shadow-sm text-[11px] font-medium"
               >
-                {allOpen ? <Shrink size={11} /> : <Expand size={11} />}
+                {allOpen ? <Shrink size={12} /> : <Expand size={12} />}
                 {allOpen ? 'Collapse All' : 'Expand All'}
               </button>
             </div>
@@ -652,16 +652,16 @@ const ContestDetailsForm = () => {
             <div className="flex items-center justify-end gap-2 pb-4">
               <button
                 onClick={() => navigate('/contests')}
-                className="px-4 py-2 rounded-lg border border-neutral-200/50 dark:border-white/5 bg-white dark:bg-[#18181b] hover:bg-neutral-50 dark:hover:bg-white/5 text-neutral-500 hover:text-neutral-900 dark:hover:text-white transition-all shadow-sm text-[11px] font-medium"
+                className="px-4 py-2 rounded-md border border-neutral-200/50 dark:border-white/5 bg-white dark:bg-[#18181b] hover:bg-neutral-50 dark:hover:bg-white/5 text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white transition-all shadow-sm text-[11px] font-medium"
               >
                 Cancel
               </button>
               <button
                 onClick={handleSave}
                 disabled={isLoading || isSaving}
-                className="px-5 py-2 rounded-lg bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 hover:opacity-90 transition-all shadow-sm flex items-center gap-1.5 text-[11px] font-semibold disabled:opacity-40"
+                className="px-5 py-2 rounded-md bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 hover:opacity-90 transition-all shadow-sm flex items-center gap-1.5 text-[11px] font-semibold disabled:opacity-40"
               >
-                {isSaving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} strokeWidth={2.5} />}
+                {isSaving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} strokeWidth={2.5} />}
                 {isSaving ? 'Saving…' : 'Save Detailed Guide'}
               </button>
             </div>
