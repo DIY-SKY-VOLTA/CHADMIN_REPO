@@ -1753,17 +1753,19 @@ const ContestImages = () => {
                 <div className="flex gap-3">
                   <button
                     onClick={() => {
-                      if (selectedContest.image?.primaryUrl) {
-                        window.open(selectedContest.image.primaryUrl, '_blank', 'noopener,noreferrer');
+                      const link = selectedContest.link || selectedContest.image?.primaryUrl;
+                      if (link) {
+                        window.open(link, '_blank', 'noopener,noreferrer');
                       } else {
-                        toast.error('No primary image URL to open');
+                        toast.error('No contest link or image URL to open');
                       }
                     }}
-                    disabled={!selectedContest.image?.primaryUrl}
+                    disabled={!selectedContest.link && !selectedContest.image?.primaryUrl}
                     className="flex-1 py-2 border border-neutral-200 dark:border-white/5 rounded-lg text-xs font-semibold text-neutral-500 hover:text-neutral-800 dark:hover:text-white bg-white dark:bg-[#18181b] hover:bg-neutral-50 dark:hover:bg-white/5 transition-colors shadow-sm flex items-center justify-center gap-1.5 disabled:opacity-40"
+                    title={selectedContest.link || 'No contest link available'}
                   >
-                    <Maximize2 size={12} />
-                    Open Image
+                    <ExternalLink size={12} />
+                    Open Link
                   </button>
                   <button
                     onClick={() => handleRecheck(selectedContest)}
