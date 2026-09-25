@@ -522,12 +522,52 @@ async function processAndUploadImageToR2(rawBuffer, contestId) {
   const publicBase = getR2PublicBase();
   const contestKey = `contests/${contestId}`;
 
-  // Process with sharp — convert to WebP
-  const webpBuffer = await sharp(rawBuffer)
-    .webp({ quality: 80, effort: 4 })
-    .toBuffer();
-
+  // Analyze the source first — format and dimensions drive the processing below.
   const metadata = await sharp(rawBuffer).metadata();
+
+  // Cap the output at MAX_OUTPUT_DIMENSION. Web pages never need more than
+  // this (imageProxyController's "original" variant is 1600px), and encoding
+  // huge sources (e.g. 6000px print-res logos) makes AVIF take 60+ seconds —
+  // long enough for platform request timeouts to kill the upload.
+  const MAX_OUTPUT_DIMENSION = 1600;
+
+  // SVG sources must be rasterized at high density or they come out blurry
+  // (sharp defaults to 72dpi). Small raster sources (<200px) get gently
+  // upscaled 2–4x so they don't look soft next to properly sized images.
+  const MIN_DIMENSION = 200;
+  const width = metadata.width || 0;
+  const height = metadata.height || 0;
+  const hasDims = width > 0 && height > 0;
+  const longest = Math.max(width, height);
+  const upscale = hasDims
+    ? Math.max(1, Math.min(4, Math.ceil(MIN_DIMENSION / longest)))
+    : 1;
+  const downscale = hasDims && longest > MAX_OUTPUT_DIMENSION
+    ? MAX_OUTPUT_DIMENSION / longest
+    : 1;
+  const scaleFactor = upscale * downscale;
+  const needsTransform = metadata.format === 'svg' || scaleFactor !== 1;
+
+  // One shared transform: render SVGs at high density, then fit the result
+  // inside the target box (preserves aspect ratio, never crops).
+  const targetBox = hasDims
+    ? {
+        width: Math.max(1, Math.round(width * scaleFactor)),
+        height: Math.max(1, Math.round(height * scaleFactor)),
+        fit: 'inside',
+        kernel: 'lanczos3',
+        withoutEnlargement: false,
+      }
+    : undefined;
+
+  let pipeline = sharp(rawBuffer, { density: 300 });
+  if (needsTransform && targetBox) {
+    pipeline = pipeline.resize(targetBox);
+  }
+
+  const webpBuffer = await pipeline
+    .webp({ quality: 85, effort: 4 })
+    .toBuffer();
 
   // Upload WebP to R2
   const webpKey = `${contestKey}/primary.webp`;
@@ -545,7 +585,10 @@ async function processAndUploadImageToR2(rawBuffer, contestId) {
   let avifBuffer = null;
   let avifKey = null;
   try {
-    avifBuffer = await sharp(rawBuffer).avif({ quality: 50, effort: 4 }).toBuffer();
+    avifBuffer = await sharp(rawBuffer, { density: 300 })
+      .resize(needsTransform && targetBox ? targetBox : undefined)
+      .avif({ quality: 55, effort: 4 })
+      .toBuffer();
     avifKey = `${contestKey}/primary.avif`;
     await client.send(new PutObjectCommand({
       Bucket: bucket,
@@ -599,7 +642,11 @@ async function processAndUploadImageToR2(rawBuffer, contestId) {
     { $set: updateFields }
   );
 
-  return { r2Url, webpBuffer, metadata, updateFields, sha256 };
+  // Report the FINAL stored dimensions (after any upscale/downscale), not the
+  // source's, so API consumers see what's actually on R2.
+  const finalMetadata = await sharp(webpBuffer).metadata();
+
+  return { r2Url, webpBuffer, metadata: finalMetadata, updateFields, sha256 };
 }
 
 /**

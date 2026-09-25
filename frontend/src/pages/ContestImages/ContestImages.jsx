@@ -27,6 +27,8 @@ import {
   CheckCheck,
   SkipForward,
   ShieldCheck,
+  Link2,
+  Maximize2,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'react-hot-toast';
@@ -79,11 +81,29 @@ const formatDate = (dateStr) => {
 
 const isValidHttpUrl = (value) => {
   if (!value || typeof value !== 'string') return false;
+  const t = value.trim();
+  if (t.startsWith('data:')) return true;
+  if (t.startsWith('http:')) return true;
   try {
-    const u = new URL(value.trim());
+    const u = new URL(t);
     return u.protocol === 'http:' || u.protocol === 'https:';
   } catch {
     return false;
+  }
+};
+
+// Convert a data: URL into a File so it can go through the normal multipart
+// upload path (the backend URL-fetch endpoint only accepts http(s) URLs).
+const dataUrlToFile = async (dataUrl) => {
+  try {
+    const res = await fetch(dataUrl);
+    const blob = await res.blob();
+    const meta = dataUrl.match(/^data:([^;,]+)/);
+    const mime = (meta && meta[1]) || blob.type || 'image/png';
+    const ext = mime.split('/')[1]?.split('+')[0]?.replace(/[^a-z0-9]/gi, '') || 'png';
+    return new File([blob], `pasted-image.${ext}`, { type: mime });
+  } catch (err) {
+    throw new Error('Invalid data URL');
   }
 };
 
@@ -161,6 +181,86 @@ const ContestImages = () => {
 
   // Background upload queue — submissions return instantly and run in the
   // background so the admin can keep hunting the next image mid-upload.
+  // Active tab URL detection constants
+  const ACTIVE_TAB_PRIMARY_ATTR = ['href', 'src', 'data-src', 'xlink:href'];
+
+  // Try to pull a URL out of the most relevant attributes of the active element.
+  const extractUrlFromActiveElement = () => {
+    const el = document.activeElement;
+    if (!el) return null;
+    // 1) A focused link/image input or any element with a URL attribute
+    for (const attr of ACTIVE_TAB_PRIMARY_ATTR) {
+      const v = el?.getAttribute(attr);
+      if (v && typeof v === 'string' && v.trim()) {
+        const t = v.trim();
+        if (t.startsWith('data:')) return t;
+        try {
+          const u = new URL(t);
+          if (u.protocol === 'http:' || u.protocol === 'https:') return t;
+        } catch {
+          // Not a parseable URL; keep scanning
+        }
+      }
+    }
+    // 2) Selection (e.g. user selected a link's text)
+    const sel = window.getSelection()?.toString()?.trim();
+    if (sel) return sel;
+    // 3) Falling back to the current page's location
+    try {
+      const host = window.location.origin;
+      return host;
+    } catch {
+      return null;
+    }
+  };
+
+  // Stick the active tab URL into the paste-url field when the user asks.
+  const useActiveTabUrl = () => {
+    const url = extractUrlFromActiveElement();
+    if (!url) {
+      toast.error('No URL found in the active tab — select a link first, or paste one manually.');
+      return;
+    }
+    setUploadUrl(url);
+    setUrlPreviewSize(null);
+    toast.success('Pasted from the active tab: ' + url.split('/').slice(0, 4).join('/'));
+  };
+
+  // Quick-copy for the primary image URL (details slide-over).
+  const [isPrimaryUrlCopied, setIsPrimaryUrlCopied] = useState(false);
+  const copyPrimaryUrlTimer = useRef(null);
+
+  const handleCopyPrimaryUrl = (contest) => {
+    const url = contest?.image?.primaryUrl;
+    if (!url) {
+      toast.error('No primary image URL to copy');
+      return;
+    }
+    const done = () => {
+      setIsPrimaryUrlCopied(true);
+      toast.success('Image URL copied');
+      if (copyPrimaryUrlTimer.current) clearTimeout(copyPrimaryUrlTimer.current);
+      copyPrimaryUrlTimer.current = setTimeout(() => setIsPrimaryUrlCopied(false), 2000);
+    };
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(url).then(done).catch(() => toast.error('Could not copy URL'));
+    } else {
+      const ta = document.createElement('textarea');
+      ta.value = url;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      try {
+        document.execCommand('copy');
+        done();
+      } catch {
+        toast.error('Could not copy URL');
+      }
+      document.body.removeChild(ta);
+    }
+  };
+
   const [uploadQueue, setUploadQueue] = useState([]); // [{ id, contestId, title, status: 'active'|'done'|'failed', message }]
   const [queueOpen, setQueueOpen] = useState(true);
   const queueActiveCount = uploadQueue.filter(j => j.status === 'active').length;
@@ -178,9 +278,10 @@ const ContestImages = () => {
   }, [contests, checkedContests]);
 
   const [isDragOver, setIsDragOver] = useState(false);
-  const [uploadMode, setUploadMode] = useState('file'); // 'file' | 'url'
+  const [uploadMode, setUploadMode] = useState('url'); // 'url' (default) | 'file'
   const [uploadUrl, setUploadUrl] = useState('');
   const [urlPreviewError, setUrlPreviewError] = useState(false);
+  const [urlPreviewSize, setUrlPreviewSize] = useState(null); // natural {w, h} of the URL preview
 
   const searchTimerRef = useRef(null);
   const recheckTimerRef = useRef(null);
@@ -348,8 +449,6 @@ const ContestImages = () => {
     }
   };
 
-  const BULK_BACKUP_BATCH = 25;
-
   // Bulk backup selected contests — runs in batches so the progress modal can
   // report live per-batch success/failure counts, then shows a final summary.
   const handleBulkBackup = async () => {
@@ -514,8 +613,9 @@ const ContestImages = () => {
     setUploadTarget(contest);
     setUploadFile(null);
     setUploadPreview(null);
-    setUploadMode('file');
+    setUploadMode('url');
     setUploadUrl('');
+    setUrlPreviewSize(null);
     setUrlPreviewError(false);
     setContestDetails(null);
     setIsLoadingDetails(true);
@@ -645,8 +745,33 @@ const ContestImages = () => {
 
     const target = uploadTarget;
     let payload;
+    let fetchedFromUrl = false; // true when the server fetches an http(s) URL itself
     if (uploadMode === 'url') {
-      payload = uploadContestImageFromUrl(target.id, uploadUrl.trim());
+      const rawUrl = uploadUrl.trim();
+      if (rawUrl.startsWith('data:')) {
+        // data: URLs can't go through the backend URL-fetch endpoint (it only
+        // accepts http(s)), so decode to a file client-side and use the normal
+        // multipart upload path instead.
+        try {
+          const file = await dataUrlToFile(rawUrl);
+          if (file.size > 15 * 1024 * 1024) {
+            toast.error('Decoded image is over the 15MB limit (' + Math.round(file.size / (1024 * 1024)) + 'MB)');
+            return;
+          }
+          payload = adminAPI.post('/contests/images/upload', (() => {
+            const formData = new FormData();
+            formData.append('contestId', target.id);
+            formData.append('image', file);
+            return formData;
+          })(), { headers: { 'Content-Type': 'multipart/form-data' } });
+        } catch (err) {
+          toast.error('Could not decode this data: URL as an image');
+          return;
+        }
+      } else {
+        payload = uploadContestImageFromUrl(target.id, rawUrl);
+        fetchedFromUrl = true;
+      }
     } else {
       const formData = new FormData();
       formData.append('contestId', target.id);
@@ -657,7 +782,7 @@ const ContestImages = () => {
     }
 
     startUploadJob(target, payload);
-    toast.success(uploadMode === 'url'
+    toast.success(fetchedFromUrl
       ? 'Queued — fetching in background. You can keep working.'
       : 'Queued — uploading in background. You can keep working.');
 
@@ -666,6 +791,7 @@ const ContestImages = () => {
     setUploadFile(null);
     setUploadPreview(null);
     setUploadUrl('');
+    setUrlPreviewSize(null);
     setUrlPreviewError(false);
 
     // Save & Next Broken: jump straight to the next broken contest
@@ -692,7 +818,8 @@ const ContestImages = () => {
     setUploadFile(null);
     setUploadPreview(null);
     setUploadUrl('');
-    setUploadMode('file');
+    setUploadMode('url');
+    setUrlPreviewSize(null);
     setUrlPreviewError(false);
     setContestDetails(null);
     setIsDragOver(false);
@@ -903,7 +1030,7 @@ const ContestImages = () => {
                   <button
                     onClick={handleBulkBackup}
                     disabled={isBulkBackingUp}
-                    className="px-3 py-1.5 rounded-lg border border-neutral-200/50 dark:border-white/5 bg-white dark:bg-[#18181b] hover:bg-neutral-50 dark:hover:bg-white/5 text-neutral-600 hover:text-neutral-900 dark:hover:text-white transition-all shadow-sm flex items-center gap-1.5 text-[11px] font-medium disabled:opacity-40"
+                    className="px-3 py-1.5 rounded-lg border border-neutral-200/50 dark:border-white/5 bg-white dark:bg-[#18181b] hover:bg-neutral-50 dark:hover:bg-white/5 text-neutral-600 hover:text-neutral-900 dark:hover:text-white transition-all shadow-sm flex items-center gap-1.5 text-[13px] font-medium disabled:opacity-40"
                   >
                     {isBulkBackingUp ? (
                       <Loader2 size={12} className="animate-spin" />
@@ -915,7 +1042,7 @@ const ContestImages = () => {
                   <button
                     onClick={handleBulkRecheck}
                     disabled={isBulkRechecking}
-                    className="px-3 py-1.5 rounded-lg border border-neutral-200/50 dark:border-white/5 bg-white dark:bg-[#18181b] hover:bg-neutral-50 dark:hover:bg-white/5 text-neutral-600 hover:text-neutral-900 dark:hover:text-white transition-all shadow-sm flex items-center gap-1.5 text-[11px] font-medium disabled:opacity-40"
+                    className="px-3 py-1.5 rounded-lg border border-neutral-200/50 dark:border-white/5 bg-white dark:bg-[#18181b] hover:bg-neutral-50 dark:hover:bg-white/5 text-neutral-600 hover:text-neutral-900 dark:hover:text-white transition-all shadow-sm flex items-center gap-1.5 text-[13px] font-medium disabled:opacity-40"
                   >
                     {isBulkRechecking ? (
                       <Loader2 size={12} className="animate-spin" />
@@ -927,7 +1054,7 @@ const ContestImages = () => {
                 </>
               )}
               {isSelectingAllMatching && (
-                <span className="flex items-center gap-1.5 text-[11px] text-neutral-400">
+                <span className="flex items-center gap-1.5 text-[13px] text-neutral-400">
                   <Loader2 size={12} className="animate-spin" />
                   Fetching all matching contests...
                 </span>
@@ -980,13 +1107,13 @@ const ContestImages = () => {
       {/* Select-all-matching banner — shown when the whole current page is selected but more matching contests exist */}
       {!isLoading && contests.length > 0 && contests.every(c => checkedContests.has(c.id)) && pagination.total > contests.length && (
         <div className="shrink-0 px-6 pb-4 flex items-center justify-between">
-          <p className="text-[11px] text-neutral-500">
+          <p className="text-[13px] text-neutral-500">
             All <span className="font-semibold text-neutral-700 dark:text-neutral-300">{contests.length}</span> contests on this page are selected.
           </p>
           <button
             onClick={handleSelectAllMatching}
             disabled={isSelectingAllMatching || checkedContests.size >= pagination.total || isBulkBackingUp}
-            className="px-3 py-1.5 rounded-lg border border-blue-200/60 dark:border-blue-500/25 bg-blue-500/5 hover:bg-blue-500/10 text-blue-600 dark:text-blue-400 text-[11px] font-semibold transition-all shadow-sm flex items-center gap-1.5 disabled:opacity-40"
+            className="px-3 py-1.5 rounded-lg border border-blue-200/60 dark:border-blue-500/25 bg-blue-500/5 hover:bg-blue-500/10 text-blue-600 dark:text-blue-400 text-[13px] font-semibold transition-all shadow-sm flex items-center gap-1.5 disabled:opacity-40"
           >
             {isSelectingAllMatching ? (
               <Loader2 size={12} className="animate-spin" />
@@ -1014,7 +1141,7 @@ const ContestImages = () => {
             <p className="text-xs font-semibold text-neutral-800 dark:text-neutral-300 mt-3">
               {debouncedSearch ? 'No matching contests found' : 'No contest data available'}
             </p>
-            <p className="text-[11px] text-neutral-400 mt-1">
+            <p className="text-[13px] text-neutral-400 mt-1">
               {debouncedSearch ? 'Try adjusting your search or filter' : 'Contests will appear once data is synced from the scrapping pipeline'}
             </p>
           </div>
@@ -1097,7 +1224,7 @@ const ContestImages = () => {
                           {contest.title}
                         </span>
                         {contest.image?.alt && (
-                          <span className="text-[10px] text-neutral-400 dark:text-neutral-500 truncate block mt-0.5">
+                          <span className="text-[12px] text-neutral-400 dark:text-neutral-500 truncate block mt-0.5">
                             {contest.image.alt}
                           </span>
                         )}
@@ -1106,7 +1233,7 @@ const ContestImages = () => {
                       {/* Category */}
                       <div className="w-[12%] pr-4 truncate">
                         {contest.category ? (
-                          <span className="px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800/50 text-[10px] font-medium text-neutral-500 dark:text-neutral-400 border border-neutral-200/50 dark:border-white/5">
+                          <span className="px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800/50 text-[12px] font-medium text-neutral-500 dark:text-neutral-400 border border-neutral-200/50 dark:border-white/5">
                             {contest.category}
                           </span>
                         ) : (
@@ -1119,7 +1246,7 @@ const ContestImages = () => {
                         {contest.source?.name ? (
                           <>
                             <Globe size={11} className="text-neutral-400 shrink-0" />
-                            <span className="truncate text-[11px]">{contest.source.name}</span>
+                            <span className="truncate text-[13px]">{contest.source.name}</span>
                           </>
                         ) : (
                           <span className="text-neutral-400">—</span>
@@ -1140,7 +1267,7 @@ const ContestImages = () => {
                       {/* Backup Status */}
                       <div className="w-[12%] pr-4">
                         {contest.image?.backupUrl ? (
-                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${STATUS_CONFIG.healthy.bg} ${STATUS_CONFIG.healthy.text} ${STATUS_CONFIG.healthy.border} border`}>
+                          <span className={`px-1.5 py-0.5 rounded text-[12px] font-semibold ${STATUS_CONFIG.healthy.bg} ${STATUS_CONFIG.healthy.text} ${STATUS_CONFIG.healthy.border} border`}>
                             R2 Backup
                           </span>
                         ) : (
@@ -1149,7 +1276,7 @@ const ContestImages = () => {
                       </div>
 
                       {/* Last Checked */}
-                      <div className="w-[11%] pr-4 text-[11px] text-neutral-400 dark:text-neutral-500">
+                      <div className="w-[11%] pr-4 text-[13px] text-neutral-400 dark:text-neutral-500">
                         {contest.image?.lastCheckedAt
                           ? formatDate(contest.image.lastCheckedAt)
                           : 'Never'}
@@ -1216,7 +1343,7 @@ const ContestImages = () => {
             >
               <ChevronLeft size={13} />
             </button>
-            <span className="text-[11px] font-medium text-neutral-500">
+            <span className="text-[13px] font-medium text-neutral-500">
               Page {page} of {totalPages}
             </span>
             <button
@@ -1262,7 +1389,7 @@ const ContestImages = () => {
                     <h3 className="text-xs font-bold text-neutral-900 dark:text-white uppercase tracking-wide">
                       {bulkProgress.done ? 'Backup Complete' : 'Backing Up Images'}
                     </h3>
-                    <p className="text-[10px] text-neutral-400 mt-0.5">
+                    <p className="text-[12px] text-neutral-400 mt-0.5">
                       {bulkProgress.done
                         ? `${bulkProgress.succeeded} succeeded, ${bulkProgress.failed} failed`
                         : `Processing ${bulkProgress.processed} of ${bulkProgress.total}`}
@@ -1279,10 +1406,10 @@ const ContestImages = () => {
                     />
                   </div>
                   <div className="flex items-center justify-between mt-1.5">
-                    <span className="text-[10px] text-neutral-400">
+                    <span className="text-[12px] text-neutral-400">
                       {bulkProgress.total ? Math.round((bulkProgress.processed / bulkProgress.total) * 100) : 0}%
                     </span>
-                    <span className="text-[10px] flex items-center gap-2">
+                    <span className="text-[12px] flex items-center gap-2">
                       <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-semibold">
                         <Check size={11} /> {bulkProgress.succeeded}
                       </span>
@@ -1296,18 +1423,18 @@ const ContestImages = () => {
                 {/* Failure summary */}
                 {bulkProgress.errors.length > 0 && (
                   <div className="bg-red-500/5 border border-red-500/15 rounded-lg p-3 max-h-40 overflow-y-auto custom-scrollbar">
-                    <p className="text-[9px] font-bold text-red-500/80 uppercase tracking-wider mb-1.5">
+                    <p className="text-[11px] font-bold text-red-500/80 uppercase tracking-wider mb-1.5">
                       Failed ({bulkProgress.errors.length})
                     </p>
                     <ul className="space-y-1">
                       {bulkProgress.errors.slice(0, 8).map((err, i) => (
-                        <li key={i} className="text-[10px] text-red-600/80 dark:text-red-400/80 flex items-start gap-1.5">
+                        <li key={i} className="text-[12px] text-red-600/80 dark:text-red-400/80 flex items-start gap-1.5">
                           <AlertTriangle size={10} className="shrink-0 mt-0.5" />
                           <span className="break-all">{err.reason}</span>
                         </li>
                       ))}
                       {bulkProgress.errors.length > 8 && (
-                        <li className="text-[10px] text-neutral-400">…and {bulkProgress.errors.length - 8} more</li>
+                        <li className="text-[12px] text-neutral-400">…and {bulkProgress.errors.length - 8} more</li>
                       )}
                     </ul>
                   </div>
@@ -1341,10 +1468,10 @@ const ContestImages = () => {
               )}
             </div>
             <div className="min-w-0">
-              <p className="text-[11px] font-semibold text-neutral-800 dark:text-neutral-200">
+              <p className="text-[13px] font-semibold text-neutral-800 dark:text-neutral-200">
                 {REALTIME_STATUS[recheckResult.status]?.label || recheckResult.status}
               </p>
-              <p className="text-[10px] text-neutral-400 mt-0.5 break-all">
+              <p className="text-[12px] text-neutral-400 mt-0.5 break-all">
                 {recheckResult.reason || `HTTP ${recheckResult.statusCode || '—'}`}
               </p>
             </div>
@@ -1379,7 +1506,7 @@ const ContestImages = () => {
             >
               {/* Header */}
               <div className="shrink-0 p-4 border-b border-neutral-200/50 dark:border-white/5 flex items-center justify-between">
-                <span className="text-[10px] font-semibold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider">
+                <span className="text-[12px] font-semibold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider">
                   Contest Image Details
                 </span>
                 <button
@@ -1398,7 +1525,7 @@ const ContestImages = () => {
                     const cfg = getStatusConfig(selectedContest);
                     const Icon = cfg.icon;
                     return (
-                      <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold ${cfg.bg} ${cfg.text} ${cfg.border} border`}>
+                      <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[12px] font-bold ${cfg.bg} ${cfg.text} ${cfg.border} border`}>
                         <Icon size={12} strokeWidth={2} />
                         {cfg.label}
                       </span>
@@ -1412,7 +1539,7 @@ const ContestImages = () => {
                     {selectedContest.title}
                   </h2>
                   {selectedContest.category && (
-                    <span className="inline-block mt-1 px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800/50 text-[9px] font-medium text-neutral-500 dark:text-neutral-400">
+                    <span className="inline-block mt-1 px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800/50 text-[11px] font-medium text-neutral-500 dark:text-neutral-400">
                       {selectedContest.category}
                     </span>
                   )}
@@ -1423,6 +1550,22 @@ const ContestImages = () => {
                   {selectedContest.image?.primaryUrl && selectedContest.imageStatus !== 'no_image' ? (
                     <div className="max-h-[180px] w-full flex items-center justify-center relative">
                       <ImagePreview src={selectedContest.image.primaryUrl} size="lg" />
+                      <a
+                        href={selectedContest.image.primaryUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="absolute top-2 right-2 p-1.5 rounded-lg bg-white/90 dark:bg-black/60 text-neutral-600 dark:text-neutral-300 hover:text-neutral-900 dark:hover:text-white shadow-sm transition-colors"
+                        title="Open full image in a new tab"
+                      >
+                        <Maximize2 size={13} />
+                      </a>
+                      <button
+                        onClick={() => handleCopyPrimaryUrl(selectedContest)}
+                        className="absolute top-2 right-9 p-1.5 rounded-lg bg-white/90 dark:bg-black/60 text-neutral-600 dark:text-neutral-300 hover:text-neutral-900 dark:hover:text-white shadow-sm transition-colors"
+                        title="Copy image URL"
+                      >
+                        {isPrimaryUrlCopied ? <Check size={13} className="text-emerald-500" /> : <Copy size={13} />}
+                      </button>
                     </div>
                   ) : selectedContest.image?.backupUrl ? (
                     <div className="max-h-[180px] w-full flex items-center justify-center relative">
@@ -1431,7 +1574,7 @@ const ContestImages = () => {
                   ) : (
                     <div className="py-10 text-center">
                       <ImageIcon size={32} className="text-neutral-400 dark:text-neutral-600 mx-auto mb-2" />
-                      <p className="text-[10px] text-neutral-400">No image available</p>
+                      <p className="text-[12px] text-neutral-400">No image available</p>
                     </div>
                   )}
                 </div>
@@ -1439,11 +1582,11 @@ const ContestImages = () => {
                 {/* Context for Generation */}
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
-                    <span className="block text-[9px] font-semibold text-neutral-400 uppercase tracking-wider">Context for Image Generation</span>
+                    <span className="block text-[11px] font-semibold text-neutral-400 uppercase tracking-wider">Context for Image Generation</span>
                     {!isLoadingSelectedDetails && selectedContestDetails && (
                       <button
                         onClick={handleCopyContext}
-                        className="flex items-center gap-1.5 px-2 py-1 rounded bg-neutral-100 dark:bg-white/5 hover:bg-neutral-200 dark:hover:bg-white/10 text-[9px] font-medium text-neutral-500 hover:text-neutral-800 dark:hover:text-white transition-colors"
+                        className="flex items-center gap-1.5 px-2 py-1 rounded bg-neutral-100 dark:bg-white/5 hover:bg-neutral-200 dark:hover:bg-white/10 text-[11px] font-medium text-neutral-500 hover:text-neutral-800 dark:hover:text-white transition-colors"
                       >
                         {isCopied ? <Check size={10} className="text-emerald-500" /> : <Copy size={10} />}
                         {isCopied ? 'Copied!' : 'Copy'}
@@ -1454,12 +1597,12 @@ const ContestImages = () => {
                     {isLoadingSelectedDetails ? (
                       <div className="flex items-center gap-2 py-2">
                         <Loader2 size={12} className="animate-spin text-neutral-400" />
-                        <span className="text-[10px] text-neutral-400">Loading full details...</span>
+                        <span className="text-[12px] text-neutral-400">Loading full details...</span>
                       </div>
                     ) : (
-                      <div className="space-y-3 text-[11px]">
+                      <div className="space-y-3 text-[13px]">
                         <div>
-                          <span className="text-[9px] font-bold text-neutral-400 uppercase block">Description</span>
+                          <span className="text-[11px] font-bold text-neutral-400 uppercase block">Description</span>
                           {selectedContestDetails?.description ? (
                             <p className="text-neutral-600 dark:text-neutral-400 mt-0.5 leading-relaxed break-words whitespace-pre-line">{selectedContestDetails.description}</p>
                           ) : (
@@ -1468,10 +1611,10 @@ const ContestImages = () => {
                         </div>
                         {selectedContestDetails?.tags?.length > 0 && (
                           <div>
-                            <span className="text-[9px] font-bold text-neutral-400 uppercase block">Tags</span>
+                            <span className="text-[11px] font-bold text-neutral-400 uppercase block">Tags</span>
                             <div className="flex flex-wrap gap-1 mt-1">
                               {selectedContestDetails.tags.map((tag, i) => (
-                                <span key={i} className="px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800/50 text-[9px] text-neutral-500 dark:text-neutral-400 border border-neutral-200/50 dark:border-white/5">
+                                <span key={i} className="px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800/50 text-[11px] text-neutral-500 dark:text-neutral-400 border border-neutral-200/50 dark:border-white/5">
                                   {tag}
                                 </span>
                               ))}
@@ -1485,13 +1628,13 @@ const ContestImages = () => {
 
                 {/* Image Source Details */}
                 <div className="space-y-2">
-                  <span className="block text-[9px] font-semibold text-neutral-400 uppercase tracking-wider">Image Source</span>
+                  <span className="block text-[11px] font-semibold text-neutral-400 uppercase tracking-wider">Image Source</span>
                   <div className="bg-neutral-50/50 dark:bg-[#1b1b1e]/30 border border-neutral-200/30 dark:border-white/5 rounded-xl p-3 space-y-2.5">
                     <div className="flex items-start gap-2">
                       <ExternalLink size={12} className="text-neutral-400 shrink-0 mt-0.5" />
                       <div className="min-w-0">
-                        <span className="text-[8px] font-bold text-neutral-400 uppercase">Primary URL</span>
-                        <p className="text-[10px] font-mono text-neutral-700 dark:text-neutral-400 break-all mt-0.5">
+                        <span className="text-[10px] font-bold text-neutral-400 uppercase">Primary URL</span>
+                        <p className="text-[12px] font-mono text-neutral-700 dark:text-neutral-400 break-all mt-0.5">
                           {selectedContest.image?.primaryUrl || '—'}
                         </p>
                       </div>
@@ -1499,7 +1642,7 @@ const ContestImages = () => {
                     {selectedContest.image?.originalDomain && (
                       <div className="flex items-center gap-2">
                         <Globe size={12} className="text-neutral-400 shrink-0" />
-                        <span className="text-[10px] text-neutral-500">
+                        <span className="text-[12px] text-neutral-500">
                           Domain: <span className="font-mono text-neutral-700 dark:text-neutral-400">{selectedContest.image.originalDomain}</span>
                         </span>
                       </div>
@@ -1507,7 +1650,7 @@ const ContestImages = () => {
                     {selectedContest.image?.alt && (
                       <div className="flex items-start gap-2">
                         <ImageIcon size={12} className="text-neutral-400 shrink-0 mt-0.5" />
-                        <span className="text-[10px] text-neutral-500">{selectedContest.image.alt}</span>
+                        <span className="text-[12px] text-neutral-500">{selectedContest.image.alt}</span>
                       </div>
                     )}
                   </div>
@@ -1515,17 +1658,17 @@ const ContestImages = () => {
 
                 {/* Backup Status */}
                 <div className="space-y-2">
-                  <span className="block text-[9px] font-semibold text-neutral-400 uppercase tracking-wider">Backup (R2)</span>
+                  <span className="block text-[11px] font-semibold text-neutral-400 uppercase tracking-wider">Backup (R2)</span>
                   <div className="bg-neutral-50/50 dark:bg-[#1b1b1e]/30 border border-neutral-200/30 dark:border-white/5 rounded-xl p-3 space-y-2">
                     {selectedContest.image?.backupUrl ? (
                       <>
                         <div className="flex items-center gap-2">
                           <CheckCircle2 size={12} className="text-emerald-500" />
-                          <span className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400">Backed up to R2</span>
+                          <span className="text-[12px] font-semibold text-emerald-600 dark:text-emerald-400">Backed up to R2</span>
                         </div>
-                        <p className="text-[9px] font-mono text-neutral-400 break-all">{selectedContest.image.backupUrl}</p>
+                        <p className="text-[11px] font-mono text-neutral-400 break-all">{selectedContest.image.backupUrl}</p>
                         {selectedContest.image?.backupFormat && (
-                          <span className="inline-flex px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[8px] font-bold">
+                          <span className="inline-flex px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[10px] font-bold">
                             {selectedContest.image.backupFormat.toUpperCase()}
                           </span>
                         )}
@@ -1533,7 +1676,7 @@ const ContestImages = () => {
                     ) : (
                       <div className="flex items-center gap-2">
                         <AlertTriangle size={12} className="text-amber-500" />
-                        <span className="text-[10px] text-amber-600 dark:text-amber-400 font-medium">No backup stored</span>
+                        <span className="text-[12px] text-amber-600 dark:text-amber-400 font-medium">No backup stored</span>
                       </div>
                     )}
                   </div>
@@ -1541,8 +1684,8 @@ const ContestImages = () => {
 
                 {/* Source Info */}
                 <div className="space-y-2">
-                  <span className="block text-[9px] font-semibold text-neutral-400 uppercase tracking-wider">Source</span>
-                  <div className="bg-neutral-50/50 dark:bg-[#1b1b1e]/30 border border-neutral-200/30 dark:border-white/5 rounded-xl p-3 space-y-2 text-[10px]">
+                  <span className="block text-[11px] font-semibold text-neutral-400 uppercase tracking-wider">Source</span>
+                  <div className="bg-neutral-50/50 dark:bg-[#1b1b1e]/30 border border-neutral-200/30 dark:border-white/5 rounded-xl p-3 space-y-2 text-[12px]">
                     {selectedContest.source?.name && (
                       <div className="flex items-center gap-2">
                         <Globe size={12} className="text-neutral-400 shrink-0" />
@@ -1573,6 +1716,16 @@ const ContestImages = () => {
                         >
                           Contest Link
                         </a>
+                        {selectedContest.image?.primaryUrl && (
+                          <button
+                            onClick={() => handleCopyPrimaryUrl(selectedContest)}
+                            className="ml-auto flex items-center gap-1 px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-white/5 hover:bg-neutral-200 dark:hover:bg-white/10 text-neutral-500 hover:text-neutral-800 dark:hover:text-white transition-colors"
+                            title="Copy image URL"
+                          >
+                            <Link2 size={11} />
+                            Copy URL
+                          </button>
+                        )}
                       </div>
                     )}
                     {selectedContest.image?.lastCheckedAt && (
@@ -1599,6 +1752,20 @@ const ContestImages = () => {
                 </button>
                 <div className="flex gap-3">
                   <button
+                    onClick={() => {
+                      if (selectedContest.image?.primaryUrl) {
+                        window.open(selectedContest.image.primaryUrl, '_blank', 'noopener,noreferrer');
+                      } else {
+                        toast.error('No primary image URL to open');
+                      }
+                    }}
+                    disabled={!selectedContest.image?.primaryUrl}
+                    className="flex-1 py-2 border border-neutral-200 dark:border-white/5 rounded-lg text-xs font-semibold text-neutral-500 hover:text-neutral-800 dark:hover:text-white bg-white dark:bg-[#18181b] hover:bg-neutral-50 dark:hover:bg-white/5 transition-colors shadow-sm flex items-center justify-center gap-1.5 disabled:opacity-40"
+                  >
+                    <Maximize2 size={12} />
+                    Open Image
+                  </button>
+                  <button
                     onClick={() => handleRecheck(selectedContest)}
                     disabled={isRechecking === selectedContest.id || !selectedContest.image?.primaryUrl}
                     className="flex-1 py-2 border border-neutral-200 dark:border-white/5 rounded-lg text-xs font-semibold text-neutral-500 hover:text-neutral-800 dark:hover:text-white bg-white dark:bg-[#18181b] hover:bg-neutral-50 dark:hover:bg-white/5 transition-colors shadow-sm flex items-center justify-center gap-1.5 disabled:opacity-40"
@@ -1608,7 +1775,7 @@ const ContestImages = () => {
                     ) : (
                       <RefreshCw size={12} />
                     )}
-                    Re-check Image
+                    Re-check
                   </button>
                   <button
                     onClick={() => setSelectedContest(null)}
@@ -1665,8 +1832,8 @@ const ContestImages = () => {
                     <h3 className="text-xs font-bold text-neutral-900 dark:text-white uppercase tracking-wide">
                       Upload Contest Image
                     </h3>
-                    <p className="text-[10px] text-neutral-400 mt-0.5">
-                      Drop or paste an image (Ctrl+V), upload a file, or paste a URL — uploads run in the background
+                    <p className="text-[12px] text-neutral-400 mt-0.5">
+                      Paste a URL (http or data:), drop/paste a file (Ctrl+V), or upload — runs in the background
                     </p>
                   </div>
                 </div>
@@ -1674,13 +1841,13 @@ const ContestImages = () => {
                 {/* Source mode toggle: file upload vs URL */}
                 <div className="p-0.5 rounded-lg bg-neutral-200/50 dark:bg-neutral-900/60 border border-neutral-200/40 dark:border-white/5 flex gap-0.5 shadow-inner">
                   {[
-                    { key: 'file', label: 'Upload File', icon: FileUp },
                     { key: 'url', label: 'Paste URL', icon: Globe },
+                    { key: 'file', label: 'Upload File', icon: FileUp },
                   ].map((opt) => (
                     <button
                       key={opt.key}
                       onClick={() => { setUploadMode(opt.key); setUrlPreviewError(false); }}
-                      className={`flex-1 px-3 py-1.5 text-[11px] font-semibold rounded-md transition-all flex items-center justify-center gap-1.5 ${
+                      className={`flex-1 px-3 py-1.5 text-xs font-semibold rounded-md transition-all flex items-center justify-center gap-1.5 ${
                         uploadMode === opt.key
                           ? 'bg-white dark:bg-[#1b1b1e] text-neutral-900 dark:text-white shadow-sm'
                           : 'text-neutral-500 dark:text-neutral-400 hover:text-neutral-800 dark:hover:text-neutral-300'
@@ -1694,7 +1861,7 @@ const ContestImages = () => {
 
                 {/* Contest Details (for reference) */}
                 <div className="bg-neutral-50/50 dark:bg-[#1b1b1e]/30 border border-neutral-200/30 dark:border-white/5 rounded-xl p-4 space-y-2.5">
-                  <span className="text-[9px] font-semibold text-neutral-400 uppercase tracking-wider flex items-center gap-1">
+                  <span className="text-[11px] font-semibold text-neutral-400 uppercase tracking-wider flex items-center gap-1">
                     <FileUp size={10} />
                     Contest Reference
                   </span>
@@ -1702,35 +1869,35 @@ const ContestImages = () => {
                   {isLoadingDetails ? (
                     <div className="flex items-center gap-2 py-2">
                       <Loader2 size={12} className="animate-spin text-neutral-400" />
-                      <span className="text-[10px] text-neutral-400">Loading details...</span>
+                      <span className="text-[12px] text-neutral-400">Loading details...</span>
                     </div>
                   ) : (
-                    <div className="space-y-2 text-[11px]">
+                    <div className="space-y-2 text-[13px]">
                       <div>
-                        <span className="text-[9px] font-bold text-neutral-400 uppercase block">Title</span>
+                        <span className="text-[11px] font-bold text-neutral-400 uppercase block">Title</span>
                         <p className="text-neutral-900 dark:text-neutral-100 font-semibold mt-0.5">{contestDetails?.title || uploadTarget.title}</p>
                       </div>
                       {contestDetails?.description && (
                         <div>
-                          <span className="text-[9px] font-bold text-neutral-400 uppercase block">Description</span>
+                          <span className="text-[11px] font-bold text-neutral-400 uppercase block">Description</span>
                           <p className="text-neutral-600 dark:text-neutral-400 mt-0.5 leading-relaxed">{contestDetails.description}</p>
                         </div>
                       )}
                       <div className="flex gap-4">
                         {contestDetails?.category && (
                           <div>
-                            <span className="text-[9px] font-bold text-neutral-400 uppercase block">Category</span>
-                            <span className="inline-block mt-0.5 px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800/50 text-[10px] font-medium text-neutral-600 dark:text-neutral-400">
+                            <span className="text-[11px] font-bold text-neutral-400 uppercase block">Category</span>
+                            <span className="inline-block mt-0.5 px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800/50 text-[12px] font-medium text-neutral-600 dark:text-neutral-400">
                               {contestDetails.category}
                             </span>
                           </div>
                         )}
                         {contestDetails?.tags?.length > 0 && (
                           <div>
-                            <span className="text-[9px] font-bold text-neutral-400 uppercase block">Tags</span>
+                            <span className="text-[11px] font-bold text-neutral-400 uppercase block">Tags</span>
                             <div className="flex flex-wrap gap-1 mt-0.5">
                               {contestDetails.tags.slice(0, 5).map((tag, i) => (
-                                <span key={i} className="px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800/50 text-[9px] text-neutral-500 dark:text-neutral-400">
+                                <span key={i} className="px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800/50 text-[11px] text-neutral-500 dark:text-neutral-400">
                                   {tag}
                                 </span>
                               ))}
@@ -1740,7 +1907,7 @@ const ContestImages = () => {
                       </div>
                       {contestDetails?.source?.name && (
                         <div>
-                          <span className="text-[9px] font-bold text-neutral-400 uppercase block">Source</span>
+                          <span className="text-[11px] font-bold text-neutral-400 uppercase block">Source</span>
                           <p className="text-neutral-600 dark:text-neutral-400 mt-0.5">{contestDetails.source.name}</p>
                         </div>
                       )}
@@ -1789,10 +1956,10 @@ const ContestImages = () => {
                           className="max-h-[200px] w-full object-contain"
                         />
                       </div>
-                      <p className="text-[11px] font-medium text-neutral-700 dark:text-neutral-300">
+                      <p className="text-[13px] font-medium text-neutral-700 dark:text-neutral-300">
                         {uploadFile.name}
                       </p>
-                      <p className="text-[10px] text-neutral-400">
+                      <p className="text-[12px] text-neutral-400">
                         {(uploadFile.size / 1024).toFixed(1)} KB — Will be compressed to WebP @80%
                       </p>
                       <button
@@ -1801,7 +1968,7 @@ const ContestImages = () => {
                           setUploadFile(null);
                           setUploadPreview(null);
                         }}
-                        className="text-[10px] text-red-500 hover:text-red-600 font-medium"
+                        className="text-[12px] text-red-500 hover:text-red-600 font-medium"
                       >
                         Remove and choose another
                       </button>
@@ -1812,7 +1979,7 @@ const ContestImages = () => {
                       <p className="text-xs font-semibold text-neutral-600 dark:text-neutral-400">
                         Click or drag an image here
                       </p>
-                      <p className="text-[10px] text-neutral-400 dark:text-neutral-500">
+                      <p className="text-[12px] text-neutral-400 dark:text-neutral-500">
                         PNG, JPEG, WebP — up to 15MB
                       </p>
                     </div>
@@ -1828,7 +1995,7 @@ const ContestImages = () => {
                       <input
                         type="url"
                         value={uploadUrl}
-                        onChange={(e) => { setUploadUrl(e.target.value); setUrlPreviewError(false); }}
+                        onChange={(e) => { setUploadUrl(e.target.value); setUrlPreviewError(false); setUrlPreviewSize(null); }}
                         onKeyDown={(e) => {
                           if (e.key === 'Enter' && isValidHttpUrl(uploadUrl)) {
                             e.preventDefault();
@@ -1840,42 +2007,63 @@ const ContestImages = () => {
                       />
                       {uploadUrl && (
                         <button
-                          onClick={() => { setUploadUrl(''); setUrlPreviewError(false); }}
+                          onClick={() => { setUploadUrl(''); setUrlPreviewError(false); setUrlPreviewSize(null); }}
                           className="shrink-0 text-neutral-400 hover:text-neutral-800 dark:hover:text-white transition-colors"
                         >
                           <X size={12} />
                         </button>
                       )}
+                      <button
+                        onClick={useActiveTabUrl}
+                        className="px-2 py-1 rounded-md bg-neutral-100 dark:bg-neutral-800/50 text-[12px] font-semibold text-neutral-600 dark:text-neutral-400 border border-neutral-200/40 dark:border-white/5 hover:bg-neutral-200 dark:hover:bg-neutral-700/50 transition-colors shrink-0"
+                      >
+                        Use active tab
+                      </button>
                     </div>
 
-                    {uploadUrl && !urlPreviewError ? (
-                      <div className="max-h-[200px] overflow-hidden rounded-lg border border-neutral-200/50 dark:border-white/10 bg-neutral-100 dark:bg-neutral-900/30">
-                        <img
-                          src={uploadUrl}
-                          alt="URL preview"
-                          className="max-h-[200px] w-full object-contain"
-                          onError={() => setUrlPreviewError(true)}
-                        />
-                      </div>
-                    ) : urlPreviewError ? (
-                      <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2.5 text-[10px] text-amber-600 dark:text-amber-400 flex items-start gap-2">
+                    {urlPreviewError && (
+                      <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2.5 text-[12px] text-amber-600 dark:text-amber-400 flex items-start gap-2">
                         <AlertTriangle size={12} className="shrink-0 mt-0.5" />
                         <span>
                           Couldn't load a preview from this URL. The server will still attempt to fetch it — double-check it points directly to an image file.
                         </span>
                       </div>
-                    ) : (
+                    )}
+                    {uploadUrl && !urlPreviewError && (
+                      <div className="relative max-h-[200px] overflow-hidden rounded-lg border border-neutral-200/50 dark:border-white/10 bg-neutral-100 dark:bg-neutral-900/30">
+                        <img
+                          src={uploadUrl}
+                          alt="URL preview"
+                          className="max-h-[200px] w-full object-contain"
+                          onError={() => setUrlPreviewError(true)}
+                          onLoad={(e) => {
+                            const img = e.currentTarget;
+                            if (img.naturalWidth && img.naturalHeight) {
+                              setUrlPreviewSize({ w: img.naturalWidth, h: img.naturalHeight });
+                            }
+                          }}
+                        />
+                        {urlPreviewSize && urlPreviewSize.w < 200 && urlPreviewSize.h < 200 && (
+                          <div className="absolute top-2 left-2 flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-500/90 text-white text-[10px] font-bold shadow-sm">
+                            <AlertTriangle size={10} />
+                            Low-res source ({urlPreviewSize.w}×{urlPreviewSize.h}) — will look blurry when enlarged
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {!urlPreviewError && !uploadUrl && (
                       <div className="rounded-lg border border-dashed border-neutral-300/40 dark:border-neutral-700/40 bg-neutral-50/30 dark:bg-[#1b1b1e]/20 px-3 py-5 text-center">
                         <Globe size={20} className="mx-auto text-neutral-400 dark:text-neutral-500 mb-1.5" strokeWidth={1.5} />
-                        <p className="text-[11px] font-medium text-neutral-500 dark:text-neutral-400">
+                        <p className="text-[13px] font-medium text-neutral-500 dark:text-neutral-400">
                           Paste a working image URL to preview it here
                         </p>
                       </div>
                     )}
 
-                    <p className="text-[10px] text-neutral-400 dark:text-neutral-500 leading-relaxed">
-                      The server fetches the image from the URL, compresses it to WebP (best-effort AVIF),
-                      uploads it to Cloudflare R2, and stores it as the contest's primary + backup.
+                    <p className="text-[12px] text-neutral-400 dark:text-neutral-500 leading-relaxed">
+                      http(s) URLs are fetched server-side; data: URLs are decoded in the browser and uploaded
+                      as a file. Either way it is compressed to WebP (best-effort AVIF) and stored as the
+                      contest's primary + backup on Cloudflare R2.
                     </p>
                   </div>
                 )}
@@ -1945,7 +2133,7 @@ const ContestImages = () => {
               ) : (
                 <CheckCheck size={14} className="text-emerald-600 dark:text-emerald-400 shrink-0" />
               )}
-              <span className="text-[11px] font-semibold text-neutral-800 dark:text-neutral-100 flex-1">
+              <span className="text-[13px] font-semibold text-neutral-800 dark:text-neutral-100 flex-1">
                 {queueActiveCount > 0
                   ? `Replacing ${queueActiveCount} image${queueActiveCount > 1 ? 's' : ''}…`
                   : queueFailedCount > 0
@@ -1953,7 +2141,7 @@ const ContestImages = () => {
                     : `${queueDoneCount} image${queueDoneCount > 1 ? 's' : ''} replaced`}
               </span>
               {queueFailedCount > 0 && (
-                <span className="px-1.5 py-0.5 rounded-full bg-red-500/10 text-red-600 dark:text-red-400 text-[9px] font-bold">
+                <span className="px-1.5 py-0.5 rounded-full bg-red-500/10 text-red-600 dark:text-red-400 text-[11px] font-bold">
                   {queueFailedCount}
                 </span>
               )}
@@ -1976,11 +2164,11 @@ const ContestImages = () => {
                     ) : (
                       <AlertTriangle size={10} className="text-red-500 shrink-0" />
                     )}
-                    <span className="text-[10px] text-neutral-700 dark:text-neutral-200 truncate flex-1" title={job.title}>
+                    <span className="text-[12px] text-neutral-700 dark:text-neutral-200 truncate flex-1" title={job.title}>
                       {job.title}
                     </span>
                     {job.status === 'failed' && (
-                      <span className="text-[9px] text-red-500 truncate max-w-[100px]" title={job.message}>
+                      <span className="text-[11px] text-red-500 truncate max-w-[100px]" title={job.message}>
                         {job.message}
                       </span>
                     )}
