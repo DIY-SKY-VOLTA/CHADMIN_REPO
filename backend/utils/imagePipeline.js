@@ -337,8 +337,12 @@ async function fetchRemoteImage(imageUrl) {
 
 /**
  * Convert to WebP (best-effort AVIF variant), upload to Cloudflare R2 under
- * `<folder>/primary.webp`, return everything the caller needs to write the
- * canonical Mongo image shape (primary + backup) for its own collection.
+ * a VERSIONED `<folder>/primary-<timestamp>-<hash>.webp` key, return
+ * everything the caller needs to write the canonical Mongo image shape
+ * (primary + backup) for its own collection. Keys must be unique per upload:
+ * a fixed `primary.webp` key meant replacements overwrote the same object at
+ * the same public URL (with immutable year-long caching), so browsers/CDNs
+ * kept serving the stale old image after a successful upload.
  */
 async function uploadImageToR2(rawBuffer, folder) {
   const client = getR2Client();
@@ -349,12 +353,15 @@ async function uploadImageToR2(rawBuffer, folder) {
   const bucket = getBucketName();
   const publicBase = getR2PublicBase();
 
+  const sha256 = crypto.createHash('sha256').update(rawBuffer).digest('hex');
+  const version = `${Date.now()}-${sha256.slice(0, 8)}`;
+
   const webpBuffer = await sharp(rawBuffer)
     .webp({ quality: 80, effort: 4 })
     .toBuffer();
   const metadata = await sharp(rawBuffer).metadata();
 
-  const webpKey = `${folder}/primary.webp`;
+  const webpKey = `${folder}/primary-${version}.webp`;
   await client.send(new PutObjectCommand({
     Bucket: bucket,
     Key: webpKey,
@@ -369,7 +376,7 @@ async function uploadImageToR2(rawBuffer, folder) {
   let avif = null;
   try {
     const avifBuffer = await sharp(rawBuffer).avif({ quality: 50, effort: 4 }).toBuffer();
-    const avifKey = `${folder}/primary.avif`;
+    const avifKey = `${folder}/primary-${version}.avif`;
     await client.send(new PutObjectCommand({
       Bucket: bucket,
       Key: avifKey,
@@ -381,8 +388,6 @@ async function uploadImageToR2(rawBuffer, folder) {
   } catch (avifErr) {
     console.warn(`AVIF conversion skipped for ${folder}: ${avifErr.message}`);
   }
-
-  const sha256 = crypto.createHash('sha256').update(rawBuffer).digest('hex');
 
   return { r2Url, webpBuffer, metadata, sha256, avif };
 }

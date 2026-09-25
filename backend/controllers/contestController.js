@@ -569,8 +569,15 @@ async function processAndUploadImageToR2(rawBuffer, contestId) {
     .webp({ quality: 85, effort: 4 })
     .toBuffer();
 
-  // Upload WebP to R2
-  const webpKey = `${contestKey}/primary.webp`;
+  // Compute SHA256 of original for dedup + cache-busting key suffix first —
+  // the R2 object key MUST be unique per upload. The old fixed key
+  // `contests/<id>/primary.webp` meant a replacement overwrote the same
+  // object at the same public URL (with `immutable` year-long caching), so
+  // browsers/CDNs kept serving the stale old image after a successful
+  // upload. Versioned keys make every replacement a brand-new URL.
+  const sha256 = crypto.createHash('sha256').update(rawBuffer).digest('hex');
+  const version = `${Date.now()}-${sha256.slice(0, 8)}`;
+  const webpKey = `${contestKey}/primary-${version}.webp`;
   await client.send(new PutObjectCommand({
     Bucket: bucket,
     Key: webpKey,
@@ -589,7 +596,7 @@ async function processAndUploadImageToR2(rawBuffer, contestId) {
       .resize(needsTransform && targetBox ? targetBox : undefined)
       .avif({ quality: 55, effort: 4 })
       .toBuffer();
-    avifKey = `${contestKey}/primary.avif`;
+    avifKey = `${contestKey}/primary-${version}.avif`;
     await client.send(new PutObjectCommand({
       Bucket: bucket,
       Key: avifKey,
@@ -600,9 +607,6 @@ async function processAndUploadImageToR2(rawBuffer, contestId) {
   } catch (avifErr) {
     console.warn(`AVIF conversion skipped for contest ${contestId}: ${avifErr.message}`);
   }
-
-  // Compute SHA256 of original for dedup
-  const sha256 = crypto.createHash('sha256').update(rawBuffer).digest('hex');
 
   // Update MongoDB
   // NOTE: image.backup is the CANONICAL OBJECT shape (matches Phase2's R2

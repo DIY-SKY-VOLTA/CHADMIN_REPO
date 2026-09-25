@@ -92,6 +92,17 @@ const isValidHttpUrl = (value) => {
   }
 };
 
+// Cache-buster for R2 image URLs. Appends ?v=<lastCheckedAt timestamp> so a
+// replacement stored at the SAME key still renders fresh instead of serving
+// the browser's cached old bytes. data:/blob: URLs pass through untouched.
+const withCacheBuster = (rawUrl, version) => {
+  if (!rawUrl || typeof rawUrl !== 'string') return rawUrl;
+  if (rawUrl.startsWith('data:') || rawUrl.startsWith('blob:')) return rawUrl;
+  const v = version ? new Date(version).getTime() : null;
+  if (!v || Number.isNaN(v)) return rawUrl;
+  return rawUrl.includes('?') ? `${rawUrl}&v=${v}` : `${rawUrl}?v=${v}`;
+};
+
 // Convert a data: URL into a File so it can go through the normal multipart
 // upload path (the backend URL-fetch endpoint only accepts http(s) URLs).
 const dataUrlToFile = async (dataUrl) => {
@@ -110,6 +121,13 @@ const dataUrlToFile = async (dataUrl) => {
 const ImagePreview = ({ src, alt, size = 'sm' }) => {
   const [hasError, setHasError] = useState(false);
   const [isLoaded, setIsLoaded] = useState(false);
+
+  // Reset error/loaded flags when the URL changes — otherwise a previously
+  // broken (or cached) src sticks and a fresh replacement never renders.
+  useEffect(() => {
+    setHasError(false);
+    setIsLoaded(false);
+  }, [src]);
 
   if (!src || hasError) {
     const iconClass = size === 'lg' ? 'w-8 h-8' : 'w-4 h-4';
@@ -1257,7 +1275,7 @@ const ContestImages = () => {
                       <div className="w-[10%] pr-4">
                         <div className="w-8 h-8 rounded-lg overflow-hidden border border-neutral-200/50 dark:border-white/10 bg-neutral-100 dark:bg-neutral-900/50 flex items-center justify-center shrink-0 relative">
                           {contest.image?.primaryUrl && contest.imageStatus !== 'no_image' ? (
-                            <ImagePreview src={contest.image.primaryUrl} />
+                            <ImagePreview src={withCacheBuster(contest.image.primaryUrl, contest.image.lastCheckedAt)} />
                           ) : (
                             <ImageIcon size={12} className="text-neutral-400" />
                           )}
@@ -1549,7 +1567,7 @@ const ContestImages = () => {
                 <div className="bg-neutral-100 dark:bg-neutral-900/30 border border-neutral-200/40 dark:border-white/5 rounded-xl p-3 shadow-inner flex items-center justify-center min-h-[140px] overflow-hidden group/viewer relative">
                   {selectedContest.image?.primaryUrl && selectedContest.imageStatus !== 'no_image' ? (
                     <div className="max-h-[180px] w-full flex items-center justify-center relative">
-                      <ImagePreview src={selectedContest.image.primaryUrl} size="lg" />
+                      <ImagePreview src={withCacheBuster(selectedContest.image.primaryUrl, selectedContest.image.lastCheckedAt)} size="lg" />
                       <a
                         href={selectedContest.image.primaryUrl}
                         target="_blank"
@@ -1569,7 +1587,7 @@ const ContestImages = () => {
                     </div>
                   ) : selectedContest.image?.backupUrl ? (
                     <div className="max-h-[180px] w-full flex items-center justify-center relative">
-                      <ImagePreview src={selectedContest.image.backupUrl} size="lg" />
+                      <ImagePreview src={withCacheBuster(selectedContest.image.backupUrl, selectedContest.image.lastCheckedAt)} size="lg" />
                     </div>
                   ) : (
                     <div className="py-10 text-center">

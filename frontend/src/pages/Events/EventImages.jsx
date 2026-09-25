@@ -34,9 +34,25 @@ const formatDate = (dateStr) => {
   } catch { return '—'; }
 };
 
+// Cache-buster for R2 image URLs — same stale-cache issue as contests: a
+// replacement at the same key renders the old cached bytes without ?v=.
+const withCacheBuster = (rawUrl, version) => {
+  if (!rawUrl || typeof rawUrl !== 'string') return rawUrl;
+  if (rawUrl.startsWith('data:') || rawUrl.startsWith('blob:')) return rawUrl;
+  const v = version ? new Date(version).getTime() : null;
+  if (!v || Number.isNaN(v)) return rawUrl;
+  return rawUrl.includes('?') ? `${rawUrl}&v=${v}` : `${rawUrl}?v=${v}`;
+};
+
 const ImagePreview = ({ src, alt }) => {
   const [hasError, setHasError] = useState(false);
   const [isLoaded, setIsLoaded] = useState(false);
+
+  // Reset error/loaded flags when the URL changes so a replacement renders.
+  useEffect(() => {
+    setHasError(false);
+    setIsLoaded(false);
+  }, [src]);
 
   if (!src || hasError) {
     return <ImageIcon size={12} className="text-neutral-400" strokeWidth={1.5} />;
@@ -490,7 +506,7 @@ const EventImages = () => {
                       <div className="w-[10%] pr-4">
                         <div className="w-8 h-8 rounded-lg overflow-hidden border border-neutral-200/50 dark:border-white/10 bg-neutral-100 dark:bg-neutral-900/50 flex items-center justify-center shrink-0 relative">
                           {event.image?.primaryUrl && event.imageStatus !== 'no_image' ? (
-                            <ImagePreview src={event.image.primaryUrl} />
+                            <ImagePreview src={withCacheBuster(event.image.primaryUrl, event.image.lastCheckedAt)} />
                           ) : (
                             <ImageIcon size={12} className="text-neutral-400" />
                           )}
