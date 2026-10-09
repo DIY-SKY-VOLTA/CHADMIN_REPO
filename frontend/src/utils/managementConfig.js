@@ -75,7 +75,7 @@ export const TERMINOLOGY = {
     events: 'Event Manager',
     eventDetails: 'Event Details',
     eventImages: 'Event Images',
-    reviewQueue: 'Review Queue',
+    
     prompts: 'Pipeline Prompts',
     editorial: 'Editorial Queue',
     posts: 'Submissions',

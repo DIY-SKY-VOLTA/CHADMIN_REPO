@@ -16,7 +16,7 @@ import EventsPage from './pages/Events/Events';
 import EventDetailsPage from './pages/Events/EventDetails';
 import EventDetailsFormPage from './pages/Events/EventDetailsForm';
 import EventImagesPage from './pages/Events/EventImages';
-import ReviewQueuePage from './pages/Events/ReviewQueue';
+
 import PublishedPage from './pages/Published/Published';
 import AnalyticsPage from './pages/Analytics/Analytics';
 import ActivityLog from './pages/ActivityLog/ActivityLog';
@@ -106,10 +106,6 @@ function App() {
         <Route 
           path="/events/:id/details" 
           element={<ProtectedRoute><EventDetailsFormPage /></ProtectedRoute>} 
-        />
-        <Route 
-          path="/events/review-queue" 
-          element={<ProtectedRoute><ReviewQueuePage /></ProtectedRoute>} 
         />
         <Route 
           path="/published" 
