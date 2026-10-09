@@ -62,7 +62,7 @@ const sections = [
         heading: 'Contests',
         items: [
           { icon: Trophy, label: 'Contests', path: '/contests', end: true },
-          { icon: FileTextIcon, label: 'Contest Guides', path: '/contests/details' },
+          { icon: FileTextIcon, label: 'Contest Guides', path: '/contests/details', activeAlso: ['/contests/:id/details'] },
           { icon: AlertTriangle, label: 'Contest Image Health', path: '/contests/images' },
           { icon: Trophy, label: 'Contest Categories', path: '/contest-categories' },
         ],
@@ -70,10 +70,9 @@ const sections = [
       {
         heading: 'Events',
         items: [
-          { icon: CalendarDays, label: 'Events', path: '/events' },
-          { icon: FileTextIcon, label: 'Event Details', path: '/events/details' },
+          { icon: CalendarDays, label: 'Events', path: '/events', end: true },
+          { icon: FileTextIcon, label: 'Event Details', path: '/events/details', activeAlso: ['/events/:id/details'] },
           { icon: ImageIcon, label: 'Event Images', path: '/events/images' },
-          { icon: AlertTriangle, label: 'Review Queue', path: '/events/review-queue' },
           { icon: CalendarDays, label: 'Event Types', path: '/event-types' },
         ],
       },
@@ -109,6 +108,35 @@ const HOVER_CLOSE_DELAY = 180;
 const isPathInSection = (pathname, itemPath) =>
   pathname === itemPath || pathname.startsWith(`${itemPath}/`);
 
+/**
+ * Segment-wise path match that understands react-router's `:param` segments.
+ * `/events/:id/details` matches `/events/abc123/details` but not
+ * `/events/abc123/images` or `/events/details`.
+ */
+const matchPath = (pathname, pattern) => {
+  const patternSegs = pattern.split('/').filter(Boolean);
+  const pathSegs = pathname.split('/').filter(Boolean);
+  if (patternSegs.length !== pathSegs.length) return false;
+  return patternSegs.every((seg, i) => seg.startsWith(':') || seg === pathSegs[i]);
+};
+
+/**
+ * Whether a nav item should render as selected.
+ *
+ * `NavLink`'s built-in isActive only knows about its own `to` path, so it can't
+ * express "this list page and that edit form are the same destination". Items
+ * that own extra routes list them in `activeAlso`, and we compute the state
+ * here instead of relying on NavLink's callback form.
+ *
+ * The `end` flag still matters: without it a parent like `/events` would also
+ * light up for its siblings `/events/details` and `/events/images`.
+ */
+const isItemActive = (item, pathname) => {
+  if (matchPath(pathname, item.path)) return true;
+  if (!item.end && pathname.startsWith(`${item.path}/`)) return true;
+  return (item.activeAlso || []).some((pattern) => matchPath(pathname, pattern));
+};
+
 const STORAGE_KEY = 'sidebar_expanded_sections';
 
 const itemClasses = (isActive) => `
@@ -137,6 +165,7 @@ const PendingBadge = ({ count }) =>
 /* ------------------------------------------------------------------ */
 
 const Flyout = ({ section, anchorTop, pendingCount, onClose }) => {
+  const location = useLocation();
   const panelRef = useRef(null);
   const [top, setTop] = useState(anchorTop);
 
@@ -180,23 +209,22 @@ const Flyout = ({ section, anchorTop, pendingCount, onClose }) => {
               {group.heading}
             </span>
           )}
-          {group.items.map((item) => (
-            <NavLink
-              key={item.path}
-              to={item.path}
-              end={item.end}
-              onClick={onClose}
-              className={({ isActive }) => itemClasses(isActive)}
-            >
-              {({ isActive }) => (
-                <>
-                  <item.icon size={16} strokeWidth={1.5} className={itemIconClasses(isActive)} />
-                  <span className="truncate">{item.label}</span>
-                  {item.badgeKey && <PendingBadge count={pendingCount} />}
-                </>
-              )}
-            </NavLink>
-          ))}
+          {group.items.map((item) => {
+            const active = isItemActive(item, location.pathname);
+            return (
+              <NavLink
+                key={item.path}
+                to={item.path}
+                onClick={onClose}
+                aria-current={active ? 'page' : undefined}
+                className={itemClasses(active)}
+              >
+                <item.icon size={16} strokeWidth={1.5} className={itemIconClasses(active)} />
+                <span className="truncate">{item.label}</span>
+                {item.badgeKey && <PendingBadge count={pendingCount} />}
+              </NavLink>
+            );
+          })}
         </div>
       ))}
     </div>
@@ -208,6 +236,7 @@ const Flyout = ({ section, anchorTop, pendingCount, onClose }) => {
 /* ------------------------------------------------------------------ */
 
 const SectionBlock = ({ section, isOpen, onToggle, pendingCount, onClose }) => {
+  const location = useLocation();
   const sectionBadge =
     pendingCount > 0 && section.groups.some((g) => g.items.some((i) => i.badgeKey))
       ? pendingCount
@@ -254,23 +283,22 @@ const SectionBlock = ({ section, isOpen, onToggle, pendingCount, onClose }) => {
                 )}
 
                 <div className="flex flex-col gap-[1px]">
-                  {group.items.map((item) => (
-                    <NavLink
-                      key={item.path}
-                      to={item.path}
-                      end={item.end}
-                      onClick={onClose}
-                      className={({ isActive }) => itemClasses(isActive)}
-                    >
-                      {({ isActive }) => (
-                        <>
-                          <item.icon size={16} strokeWidth={1.5} className={itemIconClasses(isActive)} />
-                          <span className="truncate">{item.label}</span>
-                          {item.badgeKey && <PendingBadge count={pendingCount} />}
-                        </>
-                      )}
-                    </NavLink>
-                  ))}
+                  {group.items.map((item) => {
+                    const active = isItemActive(item, location.pathname);
+                    return (
+                      <NavLink
+                        key={item.path}
+                        to={item.path}
+                        onClick={onClose}
+                        aria-current={active ? 'page' : undefined}
+                        className={itemClasses(active)}
+                      >
+                        <item.icon size={16} strokeWidth={1.5} className={itemIconClasses(active)} />
+                        <span className="truncate">{item.label}</span>
+                        {item.badgeKey && <PendingBadge count={pendingCount} />}
+                      </NavLink>
+                    );
+                  })}
                 </div>
               </div>
             ))}
