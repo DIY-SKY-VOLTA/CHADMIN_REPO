@@ -9,6 +9,7 @@
  * R2 backups. This controller closes that gap using the shared imagePipeline
  * util (same contract as the contest implementation).
  */
+const sharp = require('sharp');
 const Event = require('../models/Event');
 const {
   unwrapMarkdownUrl,
@@ -18,6 +19,10 @@ const {
   probeImageUrl,
   fetchRemoteImage,
   uploadImageToR2,
+  isPublicUrl,
+  isPublicResponseUrl,
+  FETCH_IMAGE_TIMEOUT_MS,
+  MAX_IMAGE_BYTES,
 } = require('../utils/imagePipeline');
 const { logAction } = require('./activityLogController');
 
@@ -47,6 +52,59 @@ function healEventUrl(raw) {
   return typeof u === 'string' ? u.trim() : u;
 }
 
+/**
+ * Push a raw image buffer through the R2 pipeline and write the canonical
+ * Mongo shape (primary + backup + variants) onto one event.
+ *
+ * Single source of truth for "an R2 image now belongs to this event" — shared
+ * by backup / upload / upload-url / bulk-backup so all four stay identical.
+ * The same helper exists on the contest side (processAndUploadImageToR2).
+ */
+async function persistR2ImageToEvent(eventId, rawBuffer) {
+  const folder = `events/${eventId}`;
+  const { r2Url, webpBuffer, metadata, sha256, avif } = await uploadImageToR2(rawBuffer, folder);
+
+  const now = new Date();
+  await Event.updateOne(
+    { _id: eventId },
+    {
+      $set: {
+        'image.primary.url': r2Url,
+        'image.primary.source': 'r2',
+        'image.primary.status': 'active',
+        'image.primary.fileSize': webpBuffer.length,
+        'image.primary.sha256': sha256,
+        'image.primary.lastCheckedAt': now.toISOString(),
+        'image.backup': {
+          url: r2Url,
+          source: 'r2',
+          format: 'webp',
+          status: 'active',
+          createdAt: now,
+        },
+        ...(avif
+          ? { 'image.primary.variants': { webp: { url: r2Url, size: webpBuffer.length }, avif } }
+          : {}),
+      },
+    },
+  );
+
+  return { r2Url, webpBuffer, metadata, sha256, avif };
+}
+
+/** Fire-and-forget activity logging — never let it fail the image operation. */
+async function logImageAction(req, payload) {
+  try {
+    await logAction({
+      adminId: req.admin.id,
+      adminName: req.admin.username || req.admin.id,
+      ...payload,
+    });
+  } catch (err) {
+    console.warn('Failed to log event image action:', err.message);
+  }
+}
+
 /* ── GET /api/admin/events/images/health ───────────────────────────────────── */
 
 /**
@@ -73,9 +131,11 @@ exports.getEventImagesHealth = async (req, res) => {
     }
     const typeFilter = (req.query.type || '').trim();
     if (typeFilter) query.eventType = typeFilter;
+    const sourceFilter = (req.query.source || '').trim();
+    if (sourceFilter) query['source.name'] = sourceFilter;
 
     const allImages = await Event.find(query)
-      .select('title eventType slug image media status')
+      .select('title eventType slug image media status source')
       .lean();
 
     // Keys match classifyImageStatus() return values
@@ -99,6 +159,26 @@ exports.getEventImagesHealth = async (req, res) => {
       }
     }
 
+    // idsOnly: the list payload is discarded by the client (Deep Check and
+    // "select all matching" only need the id list) — so skip the second query,
+    // the document fetch and the pagination payload entirely.
+    if (req.query.idsOnly === 'true') {
+      const [eventTypes, sources] = await Promise.all([
+        Event.distinct('eventType'),
+        Event.distinct('source.name'),
+      ]);
+      return res.json({
+        success: true,
+        ids: filteredIds,
+        pagination: { total: filteredIds.length, pages: 1 },
+        stats,
+        facets: {
+          eventTypes: eventTypes.filter(Boolean).sort(),
+          sources: sources.filter(Boolean).sort(),
+        },
+      });
+    }
+
     const totalFiltered = filteredIds.length;
     const pages = Math.max(1, Math.ceil(totalFiltered / limit));
 
@@ -106,7 +186,7 @@ exports.getEventImagesHealth = async (req, res) => {
       : sortBy === 'lastChecked' ? 'image.primary.lastCheckedAt'
       : 'title';
     const events = await Event.find({ _id: { $in: filteredIds } })
-      .select('title eventType slug image media status')
+      .select('title eventType slug image media status source')
       .sort({ [sortField]: sortOrder, _id: 1 })
       .skip((page - 1) * limit)
       .limit(limit)
@@ -132,14 +212,20 @@ exports.getEventImagesHealth = async (req, res) => {
       };
     });
 
-    const [eventTypes] = await Promise.all([Event.distinct('eventType')]);
+    const [eventTypes, sources] = await Promise.all([
+      Event.distinct('eventType'),
+      Event.distinct('source.name'),
+    ]);
 
     res.json({
       success: true,
       events: mapped,
       pagination: { total: totalFiltered, pages },
       stats,
-      facets: { eventTypes: eventTypes.filter(Boolean).sort() },
+      facets: {
+        eventTypes: eventTypes.filter(Boolean).sort(),
+        sources: sources.filter(Boolean).sort(),
+      },
     });
   } catch (error) {
     console.error('Event images health error:', error);
@@ -349,45 +435,15 @@ exports.backupEventImage = async (req, res) => {
 
     const url = healEventUrl(rawUrl);
     const { buffer } = await fetchRemoteImage(url);
-    const folder = `events/${eventId}`;
-    const { r2Url, webpBuffer, sha256, avif } = await uploadImageToR2(buffer, folder);
+    const { r2Url, webpBuffer, sha256 } = await persistR2ImageToEvent(eventId, buffer);
 
-    const now = new Date();
-    await Event.updateOne(
-      { _id: event._id },
-      {
-        $set: {
-          'image.primary.url': r2Url,
-          'image.primary.source': 'r2',
-          'image.primary.status': 'active',
-          'image.primary.fileSize': webpBuffer.length,
-          'image.primary.sha256': sha256,
-          'image.primary.lastCheckedAt': now.toISOString(),
-          'image.backup': {
-            url: r2Url,
-            source: 'r2',
-            format: 'webp',
-            status: 'active',
-            createdAt: now,
-          },
-          ...(avif ? { 'image.primary.variants': { webp: { url: r2Url, size: webpBuffer.length }, avif } } : {}),
-        },
-      },
-    );
-
-    try {
-      await logAction({
-        adminId: req.admin.id,
-        adminName: req.admin.username || req.admin.id,
-        action: 'backup_event_image',
-        description: `Backed up image to R2 for event: "${event.title || eventId}"`,
-        targetId: eventId,
-        targetType: 'event',
-        metadata: { title: event.title, sha256, format: 'webp', sizeBytes: webpBuffer.length, sourceUrl: url },
-      });
-    } catch (logErr) {
-      console.warn('Failed to log event image backup:', logErr.message);
-    }
+    await logImageAction(req, {
+      action: 'backup_event_image',
+      description: `Backed up image to R2 for event: "${event.title || eventId}"`,
+      targetId: eventId,
+      targetType: 'event',
+      metadata: { title: event.title, sha256, format: 'webp', sizeBytes: webpBuffer.length, sourceUrl: url },
+    });
 
     res.json({
       success: true,
@@ -397,6 +453,71 @@ exports.backupEventImage = async (req, res) => {
     });
   } catch (error) {
     console.error('Event image backup error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/* ── POST /api/admin/events/images/bulk-backup ────────────────────────────── */
+
+/**
+ * Back up many events' primary images to R2 in one request. The frontend calls
+ * this in batches so the progress modal can report live counts; each event is
+ * processed independently so one bad URL can't sink the batch.
+ */
+exports.bulkBackupEventImages = async (req, res) => {
+  try {
+    const { eventIds } = req.body;
+    if (!Array.isArray(eventIds) || eventIds.length === 0) {
+      return res.status(400).json({ success: false, message: 'eventIds array is required' });
+    }
+    if (eventIds.length > 100) {
+      return res.status(400).json({ success: false, message: 'eventIds is limited to 100 per batch' });
+    }
+
+    const events = await Event.find({ _id: { $in: eventIds } }).select('title image media').lean();
+    const results = { success: 0, failed: 0, errors: [] };
+
+    for (const event of events) {
+      const raw = event.image?.primary?.url || event.media?.hero || null;
+      if (!raw) {
+        results.failed++;
+        results.errors.push({ id: event._id, title: event.title, reason: 'No image URL' });
+        continue;
+      }
+      if (event.image?.backup?.url) {
+        results.failed++;
+        results.errors.push({ id: event._id, title: event.title, reason: 'Already backed up' });
+        continue;
+      }
+
+      try {
+        const url = healEventUrl(raw);
+        // SSRF guard: refuse private/loopback/link-local hosts
+        if (!(await isPublicUrl(url))) throw new Error('Non-public image host');
+        const { buffer } = await fetchRemoteImage(url);
+        await persistR2ImageToEvent(event._id, buffer);
+        results.success++;
+      } catch (err) {
+        results.failed++;
+        results.errors.push({ id: event._id, title: event.title, reason: err.message });
+      }
+    }
+
+    await logImageAction(req, {
+      action: 'bulk_backup_event_images',
+      description: `Bulk backed up ${results.success} event images`,
+      targetId: 'bulk',
+      targetType: 'system',
+      metadata: { success: results.success, failed: results.failed, requested: eventIds.length },
+    });
+
+    res.json({
+      success: true,
+      message: `Backed up ${results.success} images. Failed: ${results.failed}.`,
+      results,
+    });
+  } catch (error) {
+    console.error('Bulk event image backup error:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
@@ -427,45 +548,15 @@ exports.uploadEventImage = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Event not found' });
     }
 
-    const folder = `events/${eventId}`;
-    const { r2Url, webpBuffer, sha256, avif } = await uploadImageToR2(file.buffer, folder);
+    const { r2Url, webpBuffer, sha256 } = await persistR2ImageToEvent(eventId, file.buffer);
 
-    const now = new Date();
-    await Event.updateOne(
-      { _id: event._id },
-      {
-        $set: {
-          'image.primary.url': r2Url,
-          'image.primary.source': 'r2',
-          'image.primary.status': 'active',
-          'image.primary.fileSize': webpBuffer.length,
-          'image.primary.sha256': sha256,
-          'image.primary.lastCheckedAt': now.toISOString(),
-          'image.backup': {
-            url: r2Url,
-            source: 'r2',
-            format: 'webp',
-            status: 'active',
-            createdAt: now,
-          },
-          ...(avif ? { 'image.primary.variants': { webp: { url: r2Url, size: webpBuffer.length }, avif } } : {}),
-        },
-      },
-    );
-
-    try {
-      await logAction({
-        adminId: req.admin.id,
-        adminName: req.admin.username || req.admin.id,
-        action: 'upload_event_image',
-        description: `Uploaded replacement image for event: "${event.title || eventId}"`,
-        targetId: eventId,
-        targetType: 'event',
-        metadata: { title: event.title, sha256, format: 'webp', sizeBytes: webpBuffer.length },
-      });
-    } catch (logErr) {
-      console.warn('Failed to log event image upload:', logErr.message);
-    }
+    await logImageAction(req, {
+      action: 'upload_event_image',
+      description: `Uploaded replacement image for event: "${event.title || eventId}"`,
+      targetId: eventId,
+      targetType: 'event',
+      metadata: { title: event.title, sha256, format: 'webp', sizeBytes: webpBuffer.length },
+    });
 
     res.json({
       success: true,
@@ -475,6 +566,268 @@ exports.uploadEventImage = async (req, res) => {
     });
   } catch (error) {
     console.error('Event image upload error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/* ── POST /api/admin/events/images/upload-url ─────────────────────────────── */
+
+/**
+ * Set an event's image from a working external URL: fetch it (SSRF-guarded,
+ * size-capped, timeout-bounded), confirm it is really an image, then push it
+ * through the same R2 pipeline file uploads use. This is the single biggest
+ * usability win over the old file-only flow — an admin fixing 30 broken events
+ * pastes 30 URLs instead of downloading and re-uploading 30 files.
+ */
+exports.uploadEventImageFromUrl = async (req, res) => {
+  try {
+    const { eventId, imageUrl } = req.body;
+    if (!eventId) {
+      return res.status(400).json({ success: false, message: 'eventId is required' });
+    }
+    if (!imageUrl) {
+      return res.status(400).json({ success: false, message: 'Image URL is required' });
+    }
+
+    // Only http(s) — a data:/file: URL here would be an SSRF/local-read vector
+    let parsed;
+    try {
+      parsed = new URL(imageUrl);
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw new Error('unsupported');
+    } catch {
+      return res.status(400).json({ success: false, message: 'Invalid image URL. Must be a valid http(s) URL.' });
+    }
+
+    // SSRF guard: refuse private/loopback/link-local hosts before fetching
+    if (!(await isPublicUrl(imageUrl))) {
+      return res.status(400).json({ success: false, message: 'Image URL must point to a public host' });
+    }
+
+    const event = await Event.findById(eventId).select('title').lean();
+    if (!event) {
+      return res.status(404).json({ success: false, message: 'Event not found' });
+    }
+
+    let response;
+    try {
+      response = await fetch(imageUrl, {
+        redirect: 'follow',
+        signal: AbortSignal.timeout(FETCH_IMAGE_TIMEOUT_MS),
+        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; ChadminBot/1.0)' },
+      });
+    } catch (err) {
+      const reason = err.name === 'TimeoutError' ? `request timed out after ${FETCH_IMAGE_TIMEOUT_MS / 1000}s` : err.message;
+      return res.status(400).json({ success: false, message: `Failed to fetch image from URL: ${reason}` });
+    }
+
+    if (!response.ok) {
+      return res.status(400).json({ success: false, message: `Failed to fetch image from URL: HTTP ${response.status} ${response.statusText}` });
+    }
+
+    // Re-validate the FINAL url after redirects (redirect-to-private SSRF)
+    if (!(await isPublicResponseUrl(response))) {
+      return res.status(400).json({ success: false, message: 'Redirected image URL points to a non-public host' });
+    }
+
+    const contentType = response.headers.get('content-type') || '';
+    if (contentType && !contentType.startsWith('image/')) {
+      return res.status(400).json({ success: false, message: 'URL does not point to an image file' });
+    }
+
+    const declaredLength = parseInt(response.headers.get('content-length') || '0', 10);
+    if (declaredLength > MAX_IMAGE_BYTES) {
+      return res.status(400).json({ success: false, message: 'Image exceeds 15MB limit' });
+    }
+
+    const rawBuffer = Buffer.from(await response.arrayBuffer());
+    if (rawBuffer.length === 0) {
+      return res.status(400).json({ success: false, message: 'Empty image data from URL' });
+    }
+    if (rawBuffer.length > MAX_IMAGE_BYTES) {
+      return res.status(400).json({ success: false, message: 'Image exceeds 15MB limit' });
+    }
+
+    // uploadImageToR2 runs sharp on the buffer, which rejects non-images — but
+    // fail with a clear 400 rather than an opaque 500.
+    try {
+      await sharp(rawBuffer).metadata();
+    } catch {
+      return res.status(400).json({ success: false, message: 'URL does not point to a valid image file' });
+    }
+
+    const { r2Url, webpBuffer, sha256 } = await persistR2ImageToEvent(eventId, rawBuffer);
+
+    await logImageAction(req, {
+      action: 'upload_event_image_url',
+      description: `Fetched image from URL and backed up for event: "${event.title || eventId}"`,
+      targetId: eventId,
+      targetType: 'event',
+      metadata: { title: event.title, sha256, format: 'webp', sizeBytes: webpBuffer.length, sourceUrl: imageUrl },
+    });
+
+    res.json({
+      success: true,
+      message: 'Image fetched from URL, uploaded and backed up to R2',
+      eventId,
+      image: { url: r2Url, format: 'webp', sizeBytes: webpBuffer.length },
+    });
+  } catch (error) {
+    console.error('Event image URL upload error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/* ── POST /api/admin/events/images/bulk-recheck ───────────────────────────── */
+
+/**
+ * Live-verify many events' image URLs at once (HEAD + content-type probe) and
+ * persist each result. Backs the page's "Re-check selected" action and the
+ * "Deep Check" full sweep. Concurrency-capped so a 100-event batch doesn't
+ * open 100 sockets at the remote hosts at once.
+ */
+exports.bulkRecheckEventImages = async (req, res) => {
+  try {
+    const { eventIds } = req.body;
+    if (!Array.isArray(eventIds) || eventIds.length === 0) {
+      return res.status(400).json({ success: false, message: 'eventIds array is required' });
+    }
+    if (eventIds.length > 100) {
+      return res.status(400).json({ success: false, message: 'eventIds is limited to 100 per batch' });
+    }
+
+    const events = await Event.find({ _id: { $in: eventIds } }).select('title image media').lean();
+    const results = [];
+    const CONCURRENCY = 8;
+    const queue = events.slice();
+
+    async function worker() {
+      while (queue.length > 0) {
+        const event = queue.shift();
+        const raw = event.image?.primary?.url || event.media?.hero || null;
+
+        if (!raw) {
+          results.push({
+            id: event._id, title: event.title,
+            status: 'no_image', dbStatus: 'no_image', reason: 'No image URL',
+          });
+          continue;
+        }
+
+        const url = healEventUrl(raw);
+        try {
+          const result = await checkImageUrl(url, 8000);
+          let dbStatus = result.status === 'alive' ? 'healthy'
+            : result.status === 'dead' ? 'broken' : 'error';
+          let contentType = null;
+
+          if (result.status === 'alive') {
+            const probe = await probeImageUrl(url, 8000);
+            contentType = probe.contentType || null;
+            // A 200 HTML page (a JotForm form captured as media.hero) is not
+            // an image — report it as broken rather than "alive".
+            if (contentType && !contentType.startsWith('image/')) dbStatus = 'broken';
+          }
+
+          // Heal the stored URL in place when it was wrapped/proxied/signed
+          const patch = {};
+          if (url !== raw) {
+            patch['image.primary.url'] = url;
+            patch['media.hero'] = null;
+          }
+          patch['image.primary.status'] = dbStatus;
+          patch['image.primary.lastCheckedAt'] = new Date().toISOString();
+          await Event.updateOne({ _id: event._id }, { $set: patch }).catch(() => {});
+
+          results.push({
+            id: event._id, title: event.title,
+            status: result.status, dbStatus, contentType,
+            reason: result.reason, healed: url !== raw,
+          });
+        } catch (err) {
+          await Event.updateOne(
+            { _id: event._id },
+            { $set: { 'image.primary.status': 'error', 'image.primary.lastCheckedAt': new Date().toISOString() } },
+          ).catch(() => {});
+          results.push({
+            id: event._id, title: event.title,
+            status: 'error', dbStatus: 'error', reason: err.message,
+          });
+        }
+      }
+    }
+
+    await Promise.all(
+      Array.from({ length: Math.min(CONCURRENCY, queue.length) }, () => worker()),
+    );
+
+    res.json({ success: true, results });
+  } catch (error) {
+    console.error('Bulk event image recheck error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/* ── GET /api/admin/events/images/details ─────────────────────────────────── */
+
+/**
+ * Event context for the details slide-over: title, dates, location, organizer,
+ * source, tags — everything an admin needs to judge what the right image is,
+ * or to copy the context into the source site to find the original asset.
+ */
+exports.getEventImageDetails = async (req, res) => {
+  try {
+    const { eventId } = req.query;
+    if (!eventId) {
+      return res.status(400).json({ success: false, message: 'eventId query param is required' });
+    }
+
+    const event = await Event.findById(eventId)
+      .select('title headline eventType shortSummary detailedOverview topics tags eventDates venue location organizer source status image')
+      .lean();
+
+    if (!event) {
+      return res.status(404).json({ success: false, message: 'Event not found' });
+    }
+
+    const start = event.eventDates?.start ? new Date(event.eventDates.start) : null;
+    const end = event.eventDates?.end ? new Date(event.eventDates.end) : null;
+    const fmt = { month: 'short', day: 'numeric', year: 'numeric' };
+    const dateLabel = !start ? null
+      : (!end || start.toString() === end.toString())
+        ? start.toLocaleDateString('en-US', fmt)
+        : `${start.toLocaleDateString('en-US', fmt)} – ${end.toLocaleDateString('en-US', fmt)}`;
+
+    res.json({
+      success: true,
+      event: {
+        id: event._id,
+        title: event.title || 'Untitled Event',
+        eventType: event.eventType || null,
+        summary: event.shortSummary || event.detailedOverview || null,
+        topics: event.topics || [],
+        tags: event.tags || [],
+        dateLabel,
+        location:
+          event.location?.display
+          || [event.venue?.address?.city, event.venue?.address?.country].filter(Boolean).join(', ')
+          || event.venue?.venueName
+          || null,
+        venueName: event.venue?.venueName || null,
+        organizer: event.organizer?.name || null,
+        organizerWebsite: event.organizer?.website || null,
+        status: event.status || null,
+        source: event.source || null,
+        image: {
+          alt: event.image?.alt || null,
+          currentUrl: event.image?.primary?.url || event.media?.hero || null,
+          status: event.image?.primary?.status || null,
+          lastCheckedAt: event.image?.primary?.lastCheckedAt || null,
+          hasBackup: !!event.image?.backup?.url,
+        },
+      },
+    });
+  } catch (error) {
+    console.error('Event image details error:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 };

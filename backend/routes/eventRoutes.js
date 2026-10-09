@@ -23,10 +23,14 @@ router.use(authMiddleware);
 // Event image health management — MUST be registered before /:id so
 // 'images' is never swallowed as an :id param
 router.get('/images/health', eventImageController.getEventImagesHealth);
+router.get('/images/details', eventImageController.getEventImageDetails);
 router.post('/images/recheck', eventImageController.recheckEventImage);
+router.post('/images/bulk-recheck', eventImageController.bulkRecheckEventImages);
 router.post('/images/cleanup', eventImageController.cleanupEventImages);
 router.post('/images/backup', eventImageController.backupEventImage);
+router.post('/images/bulk-backup', eventImageController.bulkBackupEventImages);
 router.post('/images/upload', upload.single('image'), eventImageController.uploadEventImage);
+router.post('/images/upload-url', eventImageController.uploadEventImageFromUrl);
 
 router.get('/stats', eventController.getEventStats);
 router.get('/details', eventController.listEventsWithDetails);

@@ -25,3 +25,12 @@ export const archiveEvent = (id) =>
 
 export const deleteEventHard = (id) =>
   adminAPI.delete(`/events/${id}`, { params: { hard: true } });
+
+/**
+ * Set an event's image from an external URL — the server fetches it (SSRF-
+ * guarded, size-capped), verifies it is a real image, then pushes it through
+ * the same R2 pipeline a file upload uses. Lets an admin repair a run of broken
+ * events by pasting URLs instead of downloading and re-uploading files.
+ */
+export const uploadEventImageFromUrl = (eventId, imageUrl) =>
+  adminAPI.post('/events/images/upload-url', { eventId, imageUrl });

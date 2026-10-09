@@ -12,18 +12,53 @@ const mongoose = require('mongoose');
 
 /* ── Sub-schemas (mirror of Phase2 event.model.js) ─────────────────────── */
 
+/**
+ * NOTE on `strict` — mirrors backend/models/Contests.js, and for the SAME
+ * reason. The image-health controller (eventImageController.js) writes many
+ * dotted paths that are not declared below:
+ *
+ *   image.primary.status, image.primary.fileSize, image.primary.sha256,
+ *   image.primary.lastCheckedAt, image.primary.variants,
+ *   image.backup.status
+ *
+ * With the default `strict: true`, Mongoose SILENTLY DROPS all of them on
+ * every write. That is not a no-op — it breaks the health page:
+ *   • `lastCheckedAt` never persists → every event counts as "stale"
+ *   • `primary.status` never persists → classifyImageStatus() falls through
+ *     to 'unknown', so "Healthy" is structurally always ~0
+ *   • the frontend cache-buster keys off lastCheckedAt → replacements keep
+ *     rendering the browser's cached old bytes
+ *
+ * `image.backup` stays a typed OBJECT sub-document (not a string) so a legacy
+ * `$set: { 'image.backup': 'https://...' }` throws a CastError instead of
+ * silently corrupting data.
+ */
+const primaryImageSchema = new mongoose.Schema(
+  {
+    url: { type: String, trim: true },
+    source: { type: String, default: 'external' },
+    status: { type: String, default: 'active' },
+    // extra dashboard metadata (fileSize, sha256, variants, lastCheckedAt, ...)
+    // passes through via strict:false below
+  },
+  { _id: false, strict: false }
+);
+
+const backupImageSchema = new mongoose.Schema(
+  {
+    url: { type: String, trim: true },
+    source: { type: String, default: 'r2' },
+    format: { type: String },
+    status: { type: String, default: 'active' },
+    createdAt: { type: Date },
+  },
+  { _id: false, strict: false }
+);
+
 const imageSchema = new mongoose.Schema(
   {
-    primary: {
-      url: { type: String, trim: true },
-      source: { type: String, enum: ['external', 'uploaded', 'generated'], default: 'external' },
-    },
-    backup: {
-      url: { type: String, trim: true },
-      source: { type: String, default: 'r2' },
-      format: { type: String },
-      createdAt: { type: Date },
-    },
+    primary: primaryImageSchema,
+    backup: backupImageSchema,
     alt: { type: String, trim: true },
     gallery: [
       {
@@ -32,7 +67,7 @@ const imageSchema = new mongoose.Schema(
       },
     ],
   },
-  { _id: false }
+  { _id: false, strict: false }
 );
 
 const sourceSchema = new mongoose.Schema(
@@ -319,6 +354,10 @@ const eventSchema = new mongoose.Schema(
     collection: 'events',
     timestamps: true,
     autoIndex: false,
+    // See the NOTE above imageSchema: the image-health controller writes dotted
+    // paths (and reads `media.hero`) that are not declared in this schema.
+    // strict:true would silently strip every one of them.
+    strict: false,
     toJSON: { virtuals: true },
     toObject: { virtuals: true },
   }
