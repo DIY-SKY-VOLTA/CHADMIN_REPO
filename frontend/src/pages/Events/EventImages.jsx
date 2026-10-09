@@ -1048,7 +1048,7 @@ const EventImages = () => {
                   Checked
                   <ArrowUpDown size={10} strokeWidth={2} className="opacity-50" />
                 </div>
-                <div className="w-[14%] text-right">Actions</div>
+                <div className="w-[11%] text-right">Actions</div>
               </div>
 
               {/* Rows */}
@@ -1152,7 +1152,7 @@ const EventImages = () => {
                       </div>
 
                       {/* Actions */}
-                      <div className="w-[14%] text-right flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
+                      <div className="w-[11%] text-right flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
                         {event.image?.primaryUrl && !event.image?.backupUrl && (
                           <button
                             onClick={() => handleBackup(event)}
@@ -1177,6 +1177,13 @@ const EventImages = () => {
                           className="p-1.5 rounded hover:bg-neutral-100 dark:hover:bg-white/5 text-neutral-500 hover:text-neutral-800 dark:hover:text-white transition-colors disabled:opacity-30"
                         >
                           {isRechecking === event.id ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
+                        </button>
+                        <button
+                          onClick={() => handleOpenDetails(event)}
+                          title="View details"
+                          className="p-1.5 rounded hover:bg-neutral-100 dark:hover:bg-white/5 text-neutral-500 hover:text-neutral-800 dark:hover:text-white transition-colors"
+                        >
+                          <Eye size={13} />
                         </button>
                       </div>
                     </div>
@@ -1463,10 +1470,10 @@ const EventImages = () => {
                   )}
                 </div>
 
-                {/* Event context — what the right image should look like */}
+                {/* Context for Image Generation */}
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
-                    <span className="block text-[11px] font-semibold text-neutral-400 uppercase tracking-wider">Event Context</span>
+                    <span className="block text-[11px] font-semibold text-neutral-400 uppercase tracking-wider">Context for Image Generation</span>
                     {!isLoadingSelectedDetails && selectedEventDetails && (
                       <button
                         onClick={handleCopyContext}
@@ -1485,58 +1492,21 @@ const EventImages = () => {
                       </div>
                     ) : (
                       <div className="space-y-3 text-[11.5px]">
-                        {selectedEventDetails?.dateLabel && (
-                          <div className="flex items-start gap-2">
-                            <Calendar size={12} className="text-neutral-400 shrink-0 mt-0.5" />
-                            <div>
-                              <span className="text-[10px] font-bold text-neutral-400 uppercase block">Date</span>
-                              <p className="text-neutral-600 dark:text-neutral-400 mt-0.5">{selectedEventDetails.dateLabel}</p>
-                            </div>
-                          </div>
-                        )}
-                        {selectedEventDetails?.location && (
-                          <div className="flex items-start gap-2">
-                            <Globe size={12} className="text-neutral-400 shrink-0 mt-0.5" />
-                            <div>
-                              <span className="text-[10px] font-bold text-neutral-400 uppercase block">Location</span>
-                              <p className="text-neutral-600 dark:text-neutral-400 mt-0.5">{selectedEventDetails.location}</p>
-                            </div>
-                          </div>
-                        )}
-                        {selectedEventDetails?.organizer && (
-                          <div className="flex items-start gap-2">
-                            <Link2 size={12} className="text-neutral-400 shrink-0 mt-0.5" />
-                            <div className="min-w-0">
-                              <span className="text-[10px] font-bold text-neutral-400 uppercase block">Organizer</span>
-                              {selectedEventDetails.organizerWebsite ? (
-                                <a
-                                  href={selectedEventDetails.organizerWebsite}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="text-blue-600 dark:text-blue-400 hover:underline inline-flex items-center gap-1 mt-0.5"
-                                >
-                                  {selectedEventDetails.organizer}
-                                  <ExternalLink size={9} />
-                                </a>
-                              ) : (
-                                <p className="text-neutral-600 dark:text-neutral-400 mt-0.5">{selectedEventDetails.organizer}</p>
-                              )}
-                            </div>
-                          </div>
-                        )}
-                        {selectedEventDetails?.summary && (
-                          <div>
-                            <span className="text-[10px] font-bold text-neutral-400 uppercase block">Summary</span>
-                            <p className="text-neutral-600 dark:text-neutral-400 mt-0.5 leading-relaxed break-words whitespace-pre-line line-clamp-6">
+                        <div>
+                          <span className="text-[10px] font-bold text-neutral-400 uppercase block">Description</span>
+                          {selectedEventDetails?.summary ? (
+                            <p className="text-neutral-600 dark:text-neutral-400 mt-0.5 leading-relaxed break-words whitespace-pre-line">
                               {selectedEventDetails.summary}
                             </p>
-                          </div>
-                        )}
+                          ) : (
+                            <span className="text-neutral-400 italic mt-0.5 block">No description</span>
+                          )}
+                        </div>
                         {selectedEventDetails?.topics?.length > 0 && (
                           <div>
                             <span className="text-[10px] font-bold text-neutral-400 uppercase block">Topics</span>
                             <div className="flex flex-wrap gap-1 mt-1">
-                              {selectedEventDetails.topics.slice(0, 8).map((t, i) => (
+                              {selectedEventDetails.topics.slice(0, 10).map((t, i) => (
                                 <span key={i} className="px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800/50 text-[10px] text-neutral-500 dark:text-neutral-400 border border-neutral-200/50 dark:border-white/5">
                                   {t}
                                 </span>
@@ -1544,15 +1514,24 @@ const EventImages = () => {
                             </div>
                           </div>
                         )}
-                        {!selectedEventDetails?.summary && !selectedEventDetails?.topics?.length && (
-                          <span className="text-neutral-400 italic">No summary or topics recorded</span>
+                        {selectedEventDetails?.tags?.length > 0 && (
+                          <div>
+                            <span className="text-[10px] font-bold text-neutral-400 uppercase block">Tags</span>
+                            <div className="flex flex-wrap gap-1 mt-1">
+                              {selectedEventDetails.tags.map((tag, i) => (
+                                <span key={i} className="px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800/50 text-[10px] text-neutral-500 dark:text-neutral-400 border border-neutral-200/50 dark:border-white/5">
+                                  {tag}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
                         )}
                       </div>
                     )}
                   </div>
                 </div>
 
-                {/* Image source */}
+                {/* Image Source */}
                 <div className="space-y-2">
                   <span className="block text-[11px] font-semibold text-neutral-400 uppercase tracking-wider">Image Source</span>
                   <div className="bg-neutral-50/50 dark:bg-[#1b1b1e]/30 border border-neutral-200/30 dark:border-white/5 rounded-xl p-3 space-y-2.5">
@@ -1565,6 +1544,20 @@ const EventImages = () => {
                         </p>
                       </div>
                     </div>
+                    {selectedEvent.image?.originalDomain && (
+                      <div className="flex items-center gap-2">
+                        <Globe size={12} className="text-neutral-400 shrink-0" />
+                        <span className="text-[11px] text-neutral-500">
+                          Domain: <span className="font-mono text-neutral-700 dark:text-neutral-400">{selectedEvent.image.originalDomain}</span>
+                        </span>
+                      </div>
+                    )}
+                    {selectedEvent.image?.alt && (
+                      <div className="flex items-start gap-2">
+                        <ImageIcon size={12} className="text-neutral-400 shrink-0 mt-0.5" />
+                        <span className="text-[11px] text-neutral-500">{selectedEvent.image.alt}</span>
+                      </div>
+                    )}
                     {selectedEvent.image?.legacyHero && (
                       <div className="flex items-center gap-2">
                         <AlertTriangle size={12} className="text-amber-500 shrink-0" />
@@ -1573,21 +1566,10 @@ const EventImages = () => {
                         </span>
                       </div>
                     )}
-                    {selectedEventDetails?.source?.url && (
-                      <a
-                        href={selectedEventDetails.source.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-2 text-[11px] text-blue-600 dark:text-blue-400 hover:underline"
-                      >
-                        <Globe size={12} className="shrink-0" />
-                        Open source page to find the original asset
-                      </a>
-                    )}
                   </div>
                 </div>
 
-                {/* Backup status */}
+                {/* Backup (R2) */}
                 <div className="space-y-2">
                   <span className="block text-[11px] font-semibold text-neutral-400 uppercase tracking-wider">Backup (R2)</span>
                   <div className="bg-neutral-50/50 dark:bg-[#1b1b1e]/30 border border-neutral-200/30 dark:border-white/5 rounded-xl p-3 space-y-2">
@@ -1598,6 +1580,11 @@ const EventImages = () => {
                           <span className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400">Backed up to R2</span>
                         </div>
                         <p className="text-[10px] font-mono text-neutral-400 break-all">{selectedEvent.image.backupUrl}</p>
+                        {selectedEvent.image?.backupFormat && (
+                          <span className="inline-flex px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[10px] font-bold">
+                            {selectedEvent.image.backupFormat.toUpperCase()}
+                          </span>
+                        )}
                       </>
                     ) : (
                       <div className="flex items-center gap-2">
@@ -1608,20 +1595,114 @@ const EventImages = () => {
                   </div>
                 </div>
 
-                {/* Row actions */}
-                <div className="flex gap-2 pt-1">
+                {/* Source */}
+                <div className="space-y-2">
+                  <span className="block text-[11px] font-semibold text-neutral-400 uppercase tracking-wider">Source</span>
+                  <div className="bg-neutral-50/50 dark:bg-[#1b1b1e]/30 border border-neutral-200/30 dark:border-white/5 rounded-xl p-3 space-y-2 text-[11px]">
+                    {selectedEvent.source?.name && (
+                      <div className="flex items-center gap-2">
+                        <Globe size={12} className="text-neutral-400 shrink-0" />
+                        <span className="text-neutral-700 dark:text-neutral-400 font-medium">{selectedEvent.source.name}</span>
+                      </div>
+                    )}
+                    {selectedEvent.source?.url && (
+                      <div className="flex items-center gap-2">
+                        <ExternalLink size={12} className="text-neutral-400 shrink-0" />
+                        <a
+                          href={selectedEvent.source.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-blue-600 dark:text-blue-400 hover:underline truncate"
+                        >
+                          {selectedEvent.source.url}
+                        </a>
+                      </div>
+                    )}
+                    {selectedEventDetails?.organizerWebsite && (
+                      <div className="flex items-center gap-2">
+                        <Link2 size={12} className="text-neutral-400 shrink-0" />
+                        <a
+                          href={selectedEventDetails.organizerWebsite}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-blue-600 dark:text-blue-400 hover:underline truncate"
+                        >
+                          Organizer{selectedEventDetails.organizer ? ` — ${selectedEventDetails.organizer}` : ''}
+                        </a>
+                        {selectedEvent.image?.primaryUrl && (
+                          <button
+                            onClick={() => handleCopyPrimaryUrl(selectedEvent)}
+                            className="ml-auto flex items-center gap-1 px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-white/5 hover:bg-neutral-200 dark:hover:bg-white/10 text-neutral-500 hover:text-neutral-800 dark:hover:text-white transition-colors shrink-0"
+                            title="Copy image URL"
+                          >
+                            <Link2 size={11} />
+                            Copy URL
+                          </button>
+                        )}
+                      </div>
+                    )}
+                    {selectedEventDetails?.dateLabel && (
+                      <div className="flex items-center gap-2">
+                        <Calendar size={12} className="text-neutral-400 shrink-0" />
+                        <span>{selectedEventDetails.dateLabel}</span>
+                      </div>
+                    )}
+                    {selectedEvent.image?.lastCheckedAt && (
+                      <div className="flex items-center gap-2">
+                        <RefreshCw size={12} className="text-neutral-400 shrink-0" />
+                        <span>Last checked: {formatDate(selectedEvent.image.lastCheckedAt)}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Footer Actions */}
+              <div className="shrink-0 p-4 border-t border-neutral-200/50 dark:border-white/5 bg-neutral-50/50 dark:bg-neutral-900/30 flex flex-col gap-2">
+                <button
+                  onClick={() => {
+                    handleOpenUpload(selectedEvent);
+                    setSelectedEvent(null);
+                  }}
+                  className="w-full py-2 rounded-lg text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 dark:bg-emerald-600 dark:hover:bg-emerald-500 transition-colors shadow-sm flex items-center justify-center gap-1.5"
+                >
+                  <Upload size={12} />
+                  Upload Replacement Image
+                </button>
+                <div className="flex gap-3">
                   <button
-                    onClick={() => { handleCloseUpload(); handleOpenUpload(selectedEvent); }}
-                    className="flex-1 px-3 py-2 rounded-lg bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 text-[12px] font-bold shadow-sm transition-all hover:opacity-90"
+                    onClick={() => {
+                      const link = selectedEventDetails?.source?.url || selectedEventDetails?.organizerWebsite || selectedEvent.image?.primaryUrl;
+                      if (link) {
+                        window.open(link, '_blank', 'noopener,noreferrer');
+                      } else {
+                        toast.error('No event link or image URL to open');
+                      }
+                    }}
+                    disabled={!selectedEventDetails?.source?.url && !selectedEventDetails?.organizerWebsite && !selectedEvent.image?.primaryUrl}
+                    className="flex-1 py-2 border border-neutral-200 dark:border-white/5 rounded-lg text-xs font-semibold text-neutral-500 hover:text-neutral-800 dark:hover:text-white bg-white dark:bg-[#18181b] hover:bg-neutral-50 dark:hover:bg-white/5 transition-colors shadow-sm flex items-center justify-center gap-1.5 disabled:opacity-40"
+                    title="Open the source page or image in a new tab"
                   >
-                    Replace image
+                    <ExternalLink size={12} />
+                    Open Link
                   </button>
                   <button
-                    onClick={() => handleBackup(selectedEvent)}
-                    disabled={isBackingUp === selectedEvent.id || !!selectedEvent.image?.backupUrl}
-                    className="flex-1 px-3 py-2 rounded-lg border border-neutral-200/60 dark:border-white/5 text-[12px] font-semibold text-neutral-600 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-white/5 transition-colors disabled:opacity-40"
+                    onClick={() => handleRecheck(selectedEvent)}
+                    disabled={isRechecking === selectedEvent.id || !selectedEvent.image?.primaryUrl}
+                    className="flex-1 py-2 border border-neutral-200 dark:border-white/5 rounded-lg text-xs font-semibold text-neutral-500 hover:text-neutral-800 dark:hover:text-white bg-white dark:bg-[#18181b] hover:bg-neutral-50 dark:hover:bg-white/5 transition-colors shadow-sm flex items-center justify-center gap-1.5 disabled:opacity-40"
                   >
-                    Back up to R2
+                    {isRechecking === selectedEvent.id ? (
+                      <Loader2 size={12} className="animate-spin" />
+                    ) : (
+                      <RefreshCw size={12} />
+                    )}
+                    Re-check
+                  </button>
+                  <button
+                    onClick={() => setSelectedEvent(null)}
+                    className="px-4 py-2 border border-neutral-200 dark:border-white/5 rounded-lg text-xs font-semibold text-neutral-500 hover:text-neutral-800 dark:hover:text-white bg-white dark:bg-[#18181b] hover:bg-neutral-50 dark:hover:bg-white/5 transition-colors shadow-sm"
+                  >
+                    Close
                   </button>
                 </div>
               </div>

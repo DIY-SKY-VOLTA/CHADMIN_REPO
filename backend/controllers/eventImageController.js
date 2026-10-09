@@ -194,17 +194,30 @@ exports.getEventImagesHealth = async (req, res) => {
 
     const mapped = events.map((e) => {
       const primaryUrl = healEventUrl(e.image?.primary?.url || e.media?.hero || '') || null;
+      // image.backup is the canonical OBJECT { url, source, format, status, createdAt }.
+      const backupUrl = e.image?.backup?.url || null;
+      const backupFormat = e.image?.backup?.format || null;
+      const imageStatus = classifyImageStatus(e);
+      // Shown in the details slide-over so an admin can see whether an image is
+      // still being served by the original host or already lives in R2.
+      let originalDomain = null;
+      if (primaryUrl) {
+        try { originalDomain = new URL(primaryUrl).hostname; } catch { /* not a parseable URL */ }
+      }
       return {
         id: e._id,
         title: e.title || 'Untitled event',
         eventType: e.eventType || null,
         slug: e.slug || null,
-        imageStatus: classifyImageStatus(e),
+        imageStatus,
         sourceUrl: e.source?.name || e.source?.url || null,
+        source: e.source || null,
         image: {
           primaryUrl,
-          backupUrl: e.image?.backup?.url || null,
+          backupUrl,
+          backupFormat,
           alt: e.image?.alt || null,
+          originalDomain,
           lastCheckedAt: e.image?.primary?.lastCheckedAt || null,
           status: e.image?.primary?.status || null,
           legacyHero: !e.image?.primary?.url && !!e.media?.hero,
