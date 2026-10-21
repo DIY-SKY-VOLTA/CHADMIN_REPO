@@ -751,9 +751,8 @@ exports.bulkUserAction = async (req, res) => {
       try {
         const user = await User.findById(id);
         if (!user) { results.failed.push({ id, reason: 'not found' }); continue; }
-        if (user.isAdmin) { results.skippedAdmins.push(user.username); continue; }
-        if (user.deleted && action !== 'delete') { results.failed.push({ id, reason: 'already deleted' }); continue; }
-        if (action === 'delete' && user.accountStatus === 'deletion_pending') {
+        if (user.isAdmin) { results.skippedAdmins.push(user.username); continue; }if (user.deleted) { results.failed.push({ id, reason: 'already deleted' }); continue; }
+    if (action === 'delete' && user.accountStatus === 'deletion_pending') {
           results.failed.push({ id, reason: 'already scheduled for deletion' });
           continue;
         }
